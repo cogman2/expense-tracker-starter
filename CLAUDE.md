@@ -16,9 +16,14 @@ npm run preview   # preview production build
 
 ## Architecture
 
-This is a single-file React app — all state, logic, and UI live in `src/App.jsx`. There are no separate components, hooks, or routing.
+React app with two components and no routing.
+
+**Components:**
+- `src/App.jsx` — root component; owns all state (transactions, form inputs, filters), handles form submission, filters the transaction list, and renders the transaction table
+- `src/Summary.jsx` — presentational component that receives `transactions` as a prop and computes/displays income, expenses, and balance totals
+
+There are no custom hooks, context, or client-side routing.
 
 **Known issues (intentional — part of a course exercise):**
-- `amount` is stored as a string in state, causing the income/expense totals to use string concatenation instead of numeric addition (`totalIncome` and `totalExpenses` will be wrong)
 - Transaction #4 ("Freelance Work") is typed as `"expense"` despite being income
 - UI styling and code organization are intentionally rough
