@@ -1,3 +1,21 @@
+function formatMoney(value) {
+  const abs = Math.abs(value);
+  const whole = Math.floor(abs).toLocaleString('en-US');
+  const cents = (abs % 1).toFixed(2).slice(2);
+  return { whole, cents, negative: value < 0 };
+}
+
+function Figure({ value, currency = '$' }) {
+  const { whole, cents, negative } = formatMoney(value);
+  return (
+    <span>
+      <span className="currency">{negative ? '−' : ''}{currency}</span>
+      {whole}
+      <span className="cents">.{cents}</span>
+    </span>
+  );
+}
+
 function Summary({ transactions }) {
   const totalIncome = transactions
     .filter(t => t.type === "income")
@@ -8,22 +26,46 @@ function Summary({ transactions }) {
     .reduce((sum, t) => sum + parseFloat(t.amount), 0);
 
   const balance = totalIncome - totalExpenses;
+  const positive = balance >= 0;
+  const ratio = totalIncome > 0
+    ? Math.round((totalExpenses / totalIncome) * 100)
+    : null;
 
   return (
-    <div className="summary">
-      <div className="summary-card">
-        <h3>Income</h3>
-        <p className="income-amount">${totalIncome}</p>
+    <section className="standing reveal reveal-2">
+      <div className="standing-cell income small">
+        <div className="standing-label">Receipts</div>
+        <div className="standing-figure">
+          <Figure value={totalIncome} />
+        </div>
+        <div className="standing-footnote">
+          <strong>Credited</strong> &nbsp;to the books this period.
+        </div>
       </div>
-      <div className="summary-card">
-        <h3>Expenses</h3>
-        <p className="expense-amount">${totalExpenses}</p>
+
+      <div className="standing-cell expense small">
+        <div className="standing-label">Outlays</div>
+        <div className="standing-figure">
+          <Figure value={totalExpenses} />
+        </div>
+        <div className="standing-footnote">
+          <strong>Debited</strong> &nbsp;against the standing balance.
+        </div>
       </div>
-      <div className="summary-card">
-        <h3>Balance</h3>
-        <p className="balance-amount">${balance}</p>
+
+      <div className={`standing-cell lead ${positive ? 'positive' : 'negative'}`}>
+        <div className="standing-label">The Balance</div>
+        <div className="standing-figure">
+          <Figure value={balance} />
+        </div>
+        <div className="standing-footnote">
+          <strong>{positive ? 'In the Black' : 'In the Red'}</strong>
+          {ratio !== null && (
+            <> &nbsp;· outlays consumed <em>{ratio}%</em> of receipts.</>
+          )}
+        </div>
       </div>
-    </div>
+    </section>
   );
 }
 
