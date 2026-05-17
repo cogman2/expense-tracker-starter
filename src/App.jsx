@@ -72,7 +72,7 @@ function App() {
     const newTransaction = {
       id: Date.now(),
       description,
-      amount,
+      amount: parseFloat(amount),
       type,
       category,
       date: new Date().toISOString().split('T')[0],
@@ -219,37 +219,38 @@ function App() {
             </tr>
           </thead>
           <tbody>
-            {filteredTransactions.length === 0 && (
+            {filteredTransactions.length === 0 ? (
               <tr className="empty-row">
                 <td colSpan={6}>
                   <span className="ornament">⁂</span>
                   No entries match the present filters.
                 </td>
               </tr>
+            ) : (
+              filteredTransactions.map(t => (
+                <tr key={t.id} className={t.type === 'income' ? 'is-income' : 'is-expense'}>
+                  <td className="cell-date">{formatRowDate(t.date)}</td>
+                  <td className="cell-desc">{t.description}</td>
+                  <td className="cell-cat">{t.category}</td>
+                  <td className="cell-type">
+                    <span className={`type-pill ${t.type}`}>{t.type === 'income' ? 'Cr.' : 'Dr.'}</span>
+                  </td>
+                  <td className={`cell-amount ${t.type}`}>
+                    {t.type === 'income' ? '+' : '−'}${Number(t.amount).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </td>
+                  <td className="cell-actions">
+                    <button
+                      className="delete-btn"
+                      onClick={() => handleDelete(t.id)}
+                      aria-label="Strike entry"
+                      title="Strike entry"
+                    >
+                      ✕
+                    </button>
+                  </td>
+                </tr>
+              ))
             )}
-            {filteredTransactions.map(t => (
-              <tr key={t.id} className={t.type === 'income' ? 'is-income' : 'is-expense'}>
-                <td className="cell-date">{formatRowDate(t.date)}</td>
-                <td className="cell-desc">{t.description}</td>
-                <td className="cell-cat">{t.category}</td>
-                <td className="cell-type">
-                  <span className={`type-pill ${t.type}`}>{t.type === 'income' ? 'Cr.' : 'Dr.'}</span>
-                </td>
-                <td className={`cell-amount ${t.type}`}>
-                  {t.type === 'income' ? '+' : '−'}${Number(t.amount).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                </td>
-                <td className="cell-actions">
-                  <button
-                    className="delete-btn"
-                    onClick={() => handleDelete(t.id)}
-                    aria-label="Strike entry"
-                    title="Strike entry"
-                  >
-                    ✕
-                  </button>
-                </td>
-              </tr>
-            ))}
           </tbody>
         </table>
       </div>

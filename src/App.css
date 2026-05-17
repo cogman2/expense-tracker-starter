@@ -538,7 +538,8 @@
   opacity: 0;
   transition: all 180ms ease;
 }
-.ledger-table tbody tr:hover .delete-btn { opacity: 1; }
+.ledger-table tbody tr:hover .delete-btn,
+.delete-btn:focus-visible { opacity: 1; }
 .delete-btn:hover {
   border-color: var(--oxblood);
   color: var(--oxblood);
