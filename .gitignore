@@ -23,6 +23,14 @@ dist-ssr
 *.sln
 *.sw?
 
+# Env files
+.env
+.env.*
+!.env.example
+
+# Prisma generated client
+**/src/generated/
+
 # Claude Code local state
 .claude/settings.local.json
 .claude/agent-memory/
