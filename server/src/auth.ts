@@ -13,5 +13,8 @@ export const auth = betterAuth({
   }),
   emailAndPassword: {
     enabled: true,
+    // Sign-in stays enabled; the public sign-up endpoint is turned off.
+    // Accounts must be provisioned another way (e.g. admin/seed).
+    disableSignUp: true,
   },
 });
