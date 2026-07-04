@@ -12,15 +12,22 @@ datasource db {
   provider = "postgresql"
 }
 
+enum Role {
+  admin
+  agent
+}
+
 // Auth tables owned by Better Auth (email/password + database sessions).
-// These are the default Better Auth models, unmodified. Credentials live in
-// the `account` table (provider "credential"), not on the user.
+// Default Better Auth models plus a helpdesk-specific `role` column, exposed
+// to Better Auth via `user.additionalFields` in src/auth.ts. Credentials live
+// in the `account` table (provider "credential"), not on the user.
 model User {
   id            String   @id @default(uuid())
   name          String
   email         String   @unique
   emailVerified Boolean  @default(false)
   image         String?
+  role          Role     @default(agent)
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 

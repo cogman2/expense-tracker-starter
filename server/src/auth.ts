@@ -14,7 +14,19 @@ export const auth = betterAuth({
   emailAndPassword: {
     enabled: true,
     // Sign-in stays enabled; the public sign-up endpoint is turned off.
-    // Accounts must be provisioned another way (e.g. admin/seed).
+    // Accounts must be provisioned another way (e.g. the db:seed script).
     disableSignUp: true,
+  },
+  // Helpdesk role. `input: false` keeps it out of any client-supplied payload;
+  // it's set server-side (e.g. by the seed script). Defaults to "agent".
+  user: {
+    additionalFields: {
+      role: {
+        type: ["admin", "agent"],
+        required: false,
+        defaultValue: "agent",
+        input: false,
+      },
+    },
   },
 });
