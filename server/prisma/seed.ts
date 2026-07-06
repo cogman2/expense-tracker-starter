@@ -1,6 +1,7 @@
 import "dotenv/config";
 import { auth } from "../src/auth";
 import { prisma } from "../src/db";
+import { Role } from "../src/generated/prisma/enums";
 
 // Seeds a single user (admin or agent). Because the public sign-up endpoint is
 // disabled (see src/auth.ts), we create the user through Better Auth's
@@ -10,18 +11,17 @@ import { prisma } from "../src/db";
 //
 // Credentials and role come from the environment (see .env.example):
 //   SEED_USER_EMAIL, SEED_USER_PASSWORD, SEED_USER_NAME, SEED_USER_ROLE
-const ROLES = ["admin", "agent"] as const;
-type Role = (typeof ROLES)[number];
+const ROLES = Object.values(Role);
 
 function isRole(value: string): value is Role {
-  return (ROLES as readonly string[]).includes(value);
+  return (ROLES as string[]).includes(value);
 }
 
 async function main() {
   const email = (process.env.SEED_USER_EMAIL ?? "admin@example.com").toLowerCase();
   const password = process.env.SEED_USER_PASSWORD ?? "password123";
   const name = process.env.SEED_USER_NAME ?? "Admin";
-  const role = process.env.SEED_USER_ROLE ?? "admin";
+  const role = process.env.SEED_USER_ROLE ?? Role.admin;
 
   if (!isRole(role)) {
     throw new Error(`SEED_USER_ROLE must be one of ${ROLES.join(" | ")}, got "${role}"`);
