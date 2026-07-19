@@ -8,7 +8,7 @@ export function RequireAuth() {
 
   if (isPending) {
     return (
-      <main style={{ fontFamily: "system-ui, sans-serif", padding: "2rem" }}>
+      <main className="p-8 font-sans text-gray-900">
         <p>Loading…</p>
       </main>
     );

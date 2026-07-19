@@ -31,39 +31,33 @@ export function HomePage() {
   }
 
   return (
-    <div style={{ fontFamily: "system-ui, sans-serif" }}>
-      <nav
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          padding: "1rem 2rem",
-          borderBottom: "1px solid #e2e2e2",
-        }}
-      >
+    <div className="font-sans text-gray-900">
+      <nav className="flex items-center justify-between border-b border-gray-200 px-8 py-4">
         <strong>Helpdesk</strong>
-        <div style={{ display: "flex", alignItems: "center", gap: "1rem" }}>
+        <div className="flex items-center gap-4">
           <span>{session?.user.name}</span>
           <button
             type="button"
             onClick={handleSignOut}
-            style={{ padding: "0.4rem 0.8rem", cursor: "pointer" }}
+            className="cursor-pointer rounded-md border border-gray-300 px-3 py-1.5 hover:bg-gray-50"
           >
             Sign out
           </button>
         </div>
       </nav>
 
-      <main style={{ padding: "2rem" }}>
-        <h1>Helpdesk</h1>
-        <p>Full-stack project: Express + React + TypeScript on Bun.</p>
+      <main className="p-8">
+        <h1 className="text-2xl font-bold">Helpdesk</h1>
+        <p className="mt-2 text-gray-700">
+          Full-stack project: Express + React + TypeScript on Bun.
+        </p>
         {health && (
-          <p>
+          <p className="mt-2 text-gray-700">
             Server status: <strong>{health.status}</strong> ({health.service}) —{" "}
             {health.timestamp}
           </p>
         )}
-        {error && <p style={{ color: "crimson" }}>Server error: {error}</p>}
+        {error && <p className="mt-2 text-red-600">Server error: {error}</p>}
       </main>
     </div>
   );

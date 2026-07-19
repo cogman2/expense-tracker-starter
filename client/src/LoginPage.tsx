@@ -11,19 +11,9 @@ const loginSchema = z.object({
 
 type LoginValues = z.infer<typeof loginSchema>;
 
-const fieldStyle = {
-  display: "flex",
-  flexDirection: "column" as const,
-  gap: "0.35rem",
-};
-const inputStyle = {
-  padding: "0.5rem",
-  fontSize: "1rem",
-  border: "1px solid #ccc",
-  borderRadius: "0.25rem",
-};
-const invalidInputStyle = { ...inputStyle, border: "1px solid crimson" };
-const errorStyle = { color: "crimson", margin: 0, fontSize: "0.85rem" };
+const inputClass =
+  "rounded border px-2 py-2 text-base outline-none focus:border-gray-500";
+const errorClass = "m-0 text-sm text-red-600";
 
 export function LoginPage() {
   const { data: session, isPending } = useSession();
@@ -58,62 +48,50 @@ export function LoginPage() {
   });
 
   return (
-    <main
-      style={{
-        fontFamily: "system-ui, sans-serif",
-        minHeight: "100vh",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-      }}
-    >
+    <main className="flex min-h-screen items-center justify-center font-sans text-gray-900">
       <form
         onSubmit={onSubmit}
         noValidate
-        style={{
-          width: "min(22rem, 100%)",
-          display: "flex",
-          flexDirection: "column",
-          gap: "1rem",
-          padding: "2rem",
-          border: "1px solid #e2e2e2",
-          borderRadius: "0.75rem",
-        }}
+        className="flex w-[min(22rem,100%)] flex-col gap-4 rounded-xl border border-gray-200 p-8"
       >
-        <h1 style={{ margin: 0 }}>Sign in</h1>
+        <h1 className="m-0 text-2xl font-bold">Sign in</h1>
 
-        <label style={fieldStyle}>
+        <label className="flex flex-col gap-1.5">
           <span>Email</span>
           <input
             type="email"
             autoComplete="email"
             aria-invalid={errors.email ? true : undefined}
-            style={errors.email ? invalidInputStyle : inputStyle}
+            className={`${inputClass} ${
+              errors.email ? "border-red-600" : "border-gray-300"
+            }`}
             {...register("email")}
           />
-          {errors.email && <p style={errorStyle}>{errors.email.message}</p>}
+          {errors.email && <p className={errorClass}>{errors.email.message}</p>}
         </label>
 
-        <label style={fieldStyle}>
+        <label className="flex flex-col gap-1.5">
           <span>Password</span>
           <input
             type="password"
             autoComplete="current-password"
             aria-invalid={errors.password ? true : undefined}
-            style={errors.password ? invalidInputStyle : inputStyle}
+            className={`${inputClass} ${
+              errors.password ? "border-red-600" : "border-gray-300"
+            }`}
             {...register("password")}
           />
           {errors.password && (
-            <p style={errorStyle}>{errors.password.message}</p>
+            <p className={errorClass}>{errors.password.message}</p>
           )}
         </label>
 
-        {errors.root && <p style={errorStyle}>{errors.root.message}</p>}
+        {errors.root && <p className={errorClass}>{errors.root.message}</p>}
 
         <button
           type="submit"
           disabled={isSubmitting}
-          style={{ padding: "0.6rem", fontSize: "1rem", cursor: "pointer" }}
+          className="cursor-pointer rounded-md bg-gray-900 px-3 py-2.5 text-base text-white hover:bg-gray-700 disabled:cursor-not-allowed disabled:opacity-60"
         >
           {isSubmitting ? "Signing in…" : "Sign in"}
         </button>
