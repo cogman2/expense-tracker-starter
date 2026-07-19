@@ -8,6 +8,15 @@ import { prisma } from "./db";
 export const auth = betterAuth({
   baseURL: process.env.BETTER_AUTH_URL ?? "http://localhost:3000",
   secret: process.env.BETTER_AUTH_SECRET,
+  // The browser talks to the app from the Vite dev origin (proxied to here),
+  // so it must be trusted or Better Auth rejects requests with "Invalid
+  // origin". Override via BETTER_AUTH_TRUSTED_ORIGINS (comma-separated).
+  trustedOrigins: (
+    process.env.BETTER_AUTH_TRUSTED_ORIGINS ?? "http://localhost:5173"
+  )
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean),
   database: prismaAdapter(prisma, {
     provider: "postgresql",
   }),
