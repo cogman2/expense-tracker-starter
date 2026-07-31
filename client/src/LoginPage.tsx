@@ -3,6 +3,21 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { Navigate, useNavigate } from "react-router";
 import { signIn, useSession } from "./auth-client";
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import {
+  Field,
+  FieldError,
+  FieldGroup,
+  FieldLabel,
+} from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
 
 const loginSchema = z.object({
   email: z.email("Enter a valid email"),
@@ -10,10 +25,6 @@ const loginSchema = z.object({
 });
 
 type LoginValues = z.infer<typeof loginSchema>;
-
-const inputClass =
-  "rounded border px-2 py-2 text-base outline-none focus:border-gray-500";
-const errorClass = "m-0 text-sm text-red-600";
 
 export function LoginPage() {
   const { data: session, isPending } = useSession();
@@ -48,54 +59,54 @@ export function LoginPage() {
   });
 
   return (
-    <main className="flex min-h-screen items-center justify-center font-sans text-gray-900">
-      <form
-        onSubmit={onSubmit}
-        noValidate
-        className="flex w-[min(22rem,100%)] flex-col gap-4 rounded-xl border border-gray-200 p-8"
-      >
-        <h1 className="m-0 text-2xl font-bold">Sign in</h1>
+    <main className="flex min-h-screen items-center justify-center bg-muted p-4">
+      <Card className="w-full max-w-sm">
+        <CardHeader>
+          <CardTitle className="text-xl">Sign in</CardTitle>
+          <CardDescription>
+            Enter your credentials to access your account.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={onSubmit} noValidate>
+            <FieldGroup>
+              <Field data-invalid={errors.email ? true : undefined}>
+                <FieldLabel htmlFor="email">Email</FieldLabel>
+                <Input
+                  id="email"
+                  type="email"
+                  autoComplete="email"
+                  aria-invalid={errors.email ? true : undefined}
+                  {...register("email")}
+                />
+                <FieldError
+                  errors={errors.email ? [errors.email] : undefined}
+                />
+              </Field>
 
-        <label className="flex flex-col gap-1.5">
-          <span>Email</span>
-          <input
-            type="email"
-            autoComplete="email"
-            aria-invalid={errors.email ? true : undefined}
-            className={`${inputClass} ${
-              errors.email ? "border-red-600" : "border-gray-300"
-            }`}
-            {...register("email")}
-          />
-          {errors.email && <p className={errorClass}>{errors.email.message}</p>}
-        </label>
+              <Field data-invalid={errors.password ? true : undefined}>
+                <FieldLabel htmlFor="password">Password</FieldLabel>
+                <Input
+                  id="password"
+                  type="password"
+                  autoComplete="current-password"
+                  aria-invalid={errors.password ? true : undefined}
+                  {...register("password")}
+                />
+                <FieldError
+                  errors={errors.password ? [errors.password] : undefined}
+                />
+              </Field>
 
-        <label className="flex flex-col gap-1.5">
-          <span>Password</span>
-          <input
-            type="password"
-            autoComplete="current-password"
-            aria-invalid={errors.password ? true : undefined}
-            className={`${inputClass} ${
-              errors.password ? "border-red-600" : "border-gray-300"
-            }`}
-            {...register("password")}
-          />
-          {errors.password && (
-            <p className={errorClass}>{errors.password.message}</p>
-          )}
-        </label>
+              {errors.root && <FieldError errors={[errors.root]} />}
 
-        {errors.root && <p className={errorClass}>{errors.root.message}</p>}
-
-        <button
-          type="submit"
-          disabled={isSubmitting}
-          className="cursor-pointer rounded-md bg-gray-900 px-3 py-2.5 text-base text-white hover:bg-gray-700 disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          {isSubmitting ? "Signing in…" : "Sign in"}
-        </button>
-      </form>
+              <Button type="submit" disabled={isSubmitting} className="w-full">
+                {isSubmitting ? "Signing in…" : "Sign in"}
+              </Button>
+            </FieldGroup>
+          </form>
+        </CardContent>
+      </Card>
     </main>
   );
 }
