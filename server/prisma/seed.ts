@@ -19,9 +19,23 @@ function isRole(value: string): value is Role {
 
 async function main() {
   const email = (process.env.SEED_USER_EMAIL ?? "admin@example.com").toLowerCase();
-  const password = process.env.SEED_USER_PASSWORD ?? "password123";
+  const password = process.env.SEED_USER_PASSWORD;
   const name = process.env.SEED_USER_NAME ?? "Admin";
   const role = process.env.SEED_USER_ROLE ?? Role.admin;
+
+  // Never provision a real account with the well-known default password in a
+  // production-like environment; require an explicit, non-default value there.
+  if (!password || password === "password123") {
+    if (process.env.NODE_ENV === "production") {
+      throw new Error(
+        "SEED_USER_PASSWORD must be set to a strong, non-default value in production.",
+      );
+    }
+    console.warn(
+      "[seed] using default dev password — do not use outside local development",
+    );
+  }
+  const effectivePassword = password ?? "password123";
 
   if (!isRole(role)) {
     throw new Error(`SEED_USER_ROLE must be one of ${ROLES.join(" | ")}, got "${role}"`);
@@ -42,7 +56,7 @@ async function main() {
     emailVerified: true,
   });
 
-  const hash = await ctx.password.hash(password);
+  const hash = await ctx.password.hash(effectivePassword);
   await ctx.internalAdapter.linkAccount({
     userId: user.id,
     providerId: "credential",

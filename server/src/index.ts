@@ -57,7 +57,9 @@ app.get("/ready", async (_req, res) => {
 // Example protected route: requireAuth gates it, and req.auth holds the
 // authenticated session/user.
 app.get("/api/me", requireAuth, (req, res) => {
-  res.json(req.auth);
+  // Return only the user profile — never the session object, which contains
+  // the raw session token (the same secret as the httpOnly cookie).
+  res.json({ user: req.auth!.user });
 });
 
 const server = app.listen(PORT, () => {

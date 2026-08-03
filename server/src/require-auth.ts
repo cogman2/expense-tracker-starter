@@ -35,3 +35,25 @@ export async function requireAuth(
   req.auth = session;
   next();
 }
+
+// Route guard: like requireAuth, but additionally requires the admin role.
+// Must run after requireAuth (or be composed with it) so `req.auth` is set.
+// This is the server-side counterpart to client/src/RequireAdmin.tsx — the
+// client guard is UX only; this is what actually protects admin-only data.
+export async function requireAdmin(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) {
+  if (!req.auth) {
+    res.status(401).json({ error: "unauthorized" });
+    return;
+  }
+
+  if (req.auth.user.role !== "admin") {
+    res.status(403).json({ error: "forbidden" });
+    return;
+  }
+
+  next();
+}
