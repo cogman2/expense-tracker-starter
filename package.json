@@ -12,7 +12,8 @@
     "dev:server": "bun run --filter server dev",
     "dev:client": "bun run --filter client dev",
     "build": "bun run --filter '*' build",
-    "typecheck": "bun run --filter '*' typecheck",
+    "typecheck": "bun run --filter '*' typecheck && bun run typecheck:e2e",
+    "typecheck:e2e": "tsc --noEmit -p e2e/tsconfig.json",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:report": "playwright show-report"
