@@ -11,7 +11,20 @@ Bun workspace ("helpdesk"): `client/` (React + React Router + Vite) and
 - `bun run typecheck` — type-check client, server, **and** the e2e/config files.
 - `bun run test:e2e` — Playwright end-to-end suite (see below).
 
-## End-to-end tests
+## Testing
+
+The repo has two kinds of tests:
+
+- **Component / unit tests** — `bun test`, run in the client workspace with
+  happy-dom preloaded (`client/bunfig.toml`). Specs are `client/src/*.test.tsx`
+  (e.g. `App.routing.test.tsx`). Run with `bun run --filter client test` from the
+  root, or `bun test` inside `client/`.
+- **End-to-end tests** — Playwright, described below.
+
+**Always type-check after changing tests:** `bun run typecheck` covers the client
+(including component specs) and the e2e/config files.
+
+### End-to-end tests (Playwright)
 
 Playwright specs live in `e2e/*.spec.ts` and run against an **isolated test
 database** that `e2e/global-setup.ts` resets and seeds before every run. Config:
@@ -27,7 +40,7 @@ bun run test:e2e        # headless
 bun run test:e2e:ui     # interactive
 ```
 
-### Use the `e2e-test-writer` agent to write e2e tests
+### Writing tests — use the `e2e-test-writer` agent
 
 When asked to write, add, or extend Playwright end-to-end tests — login flows,
 route guards, admin gating, auth, navigation, or coverage for a newly landed
