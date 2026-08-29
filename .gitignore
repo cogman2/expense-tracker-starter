@@ -40,4 +40,3 @@ dist-ssr
 # Claude Code local state
 .claude/settings.local.json
 .claude/agent-memory/
-.claude/agents/
