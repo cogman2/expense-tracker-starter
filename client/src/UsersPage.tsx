@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -27,8 +27,36 @@ const createUserSchema = z.object({
 
 type CreateUserValues = z.infer<typeof createUserSchema>;
 
+type UserRow = {
+  id: string;
+  name: string;
+  email: string;
+  role: "admin" | "agent";
+  createdAt: string;
+};
+
 export function UsersPage() {
   const [createdMessage, setCreatedMessage] = useState<string | null>(null);
+  const [users, setUsers] = useState<UserRow[] | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  const loadUsers = useCallback(async () => {
+    setLoadError(null);
+    try {
+      const res = await fetch("/api/users");
+      if (!res.ok) {
+        throw new Error(`Request failed (${res.status})`);
+      }
+      const data = (await res.json()) as { users: UserRow[] };
+      setUsers(data.users);
+    } catch {
+      setLoadError("Could not load users.");
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadUsers();
+  }, [loadUsers]);
 
   const {
     register,
@@ -64,11 +92,49 @@ export function UsersPage() {
 
     setCreatedMessage(`Created ${values.role} account for ${values.email}.`);
     reset();
+    // Reflect the new account in the list without a manual reload.
+    void loadUsers();
   });
 
   return (
     <main className="p-8 font-sans text-gray-900">
       <h1 className="text-2xl font-bold">Users</h1>
+
+      <section className="mt-6">
+        {loadError && <p className="text-sm text-red-600">{loadError}</p>}
+        {!loadError && users === null && (
+          <p className="text-sm text-gray-500">Loading users…</p>
+        )}
+        {!loadError && users !== null && users.length === 0 && (
+          <p className="text-sm text-gray-500">No users yet.</p>
+        )}
+        {!loadError && users !== null && users.length > 0 && (
+          <div className="max-w-2xl overflow-x-auto">
+            <table className="w-full border-collapse text-left text-sm">
+              <thead>
+                <tr className="border-b border-gray-200 text-gray-500">
+                  <th className="py-2 pr-4 font-medium">Name</th>
+                  <th className="py-2 pr-4 font-medium">Email</th>
+                  <th className="py-2 pr-4 font-medium">Role</th>
+                  <th className="py-2 font-medium">Created</th>
+                </tr>
+              </thead>
+              <tbody>
+                {users.map((u) => (
+                  <tr key={u.id} className="border-b border-gray-100">
+                    <td className="py-2 pr-4">{u.name}</td>
+                    <td className="py-2 pr-4">{u.email}</td>
+                    <td className="py-2 pr-4">{u.role}</td>
+                    <td className="py-2">
+                      {new Date(u.createdAt).toLocaleDateString()}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
 
       <Card className="mt-6 w-full max-w-sm">
         <CardHeader>

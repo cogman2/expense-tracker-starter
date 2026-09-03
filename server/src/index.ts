@@ -86,6 +86,17 @@ const MIN_PASSWORD_LENGTH = 8;
 // Basic shape check; Better Auth / the DB remain the source of truth.
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+// Admin-only user list. Explicit `select` (never raw rows) keeps the response
+// to safe fields — no password hash (which lives on Account, not User) or
+// session data can leak.
+app.get("/api/users", requireAuth, requireAdmin, async (_req, res) => {
+  const users = await prisma.user.findMany({
+    select: { id: true, name: true, email: true, role: true, createdAt: true },
+    orderBy: { createdAt: "asc" },
+  });
+  res.json({ users });
+});
+
 app.post("/api/users", requireAuth, requireAdmin, async (req, res) => {
   const body = (req.body ?? {}) as Record<string, unknown>;
   const name = typeof body.name === "string" ? body.name.trim() : "";
