@@ -1,15 +1,5 @@
-import { expect, test, type Page } from "@playwright/test";
-
-const ADMIN = { email: "admin@example.com", password: "password123" };
-
-// Fills and submits the login form. Does not assert on the outcome — callers
-// assert the redirect/error behavior they care about.
-async function login(page: Page, email: string, password: string) {
-  await page.goto("/login");
-  await page.getByLabel("Email").fill(email);
-  await page.getByLabel("Password").fill(password);
-  await page.getByRole("button", { name: "Sign in" }).click();
-}
+import { expect, test } from "@playwright/test";
+import { ADMIN, login } from "./auth-helpers";
 
 test.describe("Login page", () => {
   test("successful sign-in redirects to the home page", async ({ page }) => {
