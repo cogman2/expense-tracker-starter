@@ -1,12 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
 import { signOut, useSession } from "./auth-client";
-
-interface ApiHealth {
-  status: "ok";
-  service: string;
-  timestamp: string;
-}
+import { getHealth, type ApiHealth } from "@/lib/api";
 
 export function HomePage() {
   const { data: session } = useSession();
@@ -16,8 +11,7 @@ export function HomePage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch("/api/health")
-      .then((res) => res.json() as Promise<ApiHealth>)
+    getHealth()
       .then(setHealth)
       .catch((err: unknown) => setError(String(err)));
   }, []);

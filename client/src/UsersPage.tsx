@@ -17,6 +17,12 @@ import {
   FieldLabel,
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import {
+  apiErrorMessage,
+  createUser,
+  getUsers,
+  type UserRow,
+} from "@/lib/api";
 
 const createUserSchema = z.object({
   name: z.string().min(1, "Name is required"),
@@ -27,14 +33,6 @@ const createUserSchema = z.object({
 
 type CreateUserValues = z.infer<typeof createUserSchema>;
 
-type UserRow = {
-  id: string;
-  name: string;
-  email: string;
-  role: "admin" | "agent";
-  createdAt: string;
-};
-
 export function UsersPage() {
   const [createdMessage, setCreatedMessage] = useState<string | null>(null);
   const [users, setUsers] = useState<UserRow[] | null>(null);
@@ -43,12 +41,7 @@ export function UsersPage() {
   const loadUsers = useCallback(async () => {
     setLoadError(null);
     try {
-      const res = await fetch("/api/users");
-      if (!res.ok) {
-        throw new Error(`Request failed (${res.status})`);
-      }
-      const data = (await res.json()) as { users: UserRow[] };
-      setUsers(data.users);
+      setUsers(await getUsers());
     } catch {
       setLoadError("Could not load users.");
     }
@@ -72,20 +65,14 @@ export function UsersPage() {
 
   const onSubmit = handleSubmit(async (values) => {
     setCreatedMessage(null);
-    const res = await fetch("/api/users", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      // Same-origin request; the session cookie is sent automatically so the
-      // server's requireAdmin guard can authorize it.
-      body: JSON.stringify(values),
-    });
-
-    if (!res.ok) {
-      const data = (await res.json().catch(() => null)) as
-        | { error?: string }
-        | null;
+    try {
+      await createUser(values);
+    } catch (err) {
       setError("root", {
-        message: data?.error ?? "Could not create the user. Please try again.",
+        message: apiErrorMessage(
+          err,
+          "Could not create the user. Please try again.",
+        ),
       });
       return;
     }

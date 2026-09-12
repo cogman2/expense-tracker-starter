@@ -1,25 +1,29 @@
-import { afterEach, describe, expect, mock, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter } from "react-router";
-
-// Drives the mocked session that the route guards (RequireAuth / RequireAdmin)
-// read via useSession. Mutated per test, then App is rendered fresh.
-type Role = "admin" | "agent";
-type SessionState = {
-  data: { user: { role: Role; name: string } } | null;
-  isPending: boolean;
-};
-let sessionState: SessionState = { data: null, isPending: false };
+import { authClientMock, setSession } from "./testUtils";
+import { fakeHttp, restoreHttp } from "./testHttp";
 
 // Mock the auth client before App (and the guards) are imported. Guards import
-// "./auth-client"; this test lives beside them so the specifier resolves the same.
-mock.module("./auth-client", () => ({
-  useSession: () => sessionState,
-  signIn: { email: async () => ({ error: null }) },
-  signOut: async () => {},
-  authClient: {},
-}));
+// "./auth-client"; this test lives beside them so the specifier resolves the
+// same. The factory is shared with the other specs — see testUtils — because
+// mock.module registrations are global to the whole `bun test` process.
+mock.module("./auth-client", authClientMock);
+
+// Keep the pages off the network. Faked at the axios adapter rather than by
+// mocking "@/lib/api", which would replace that module for every other spec in
+// the process too.
+beforeEach(() => {
+  fakeHttp((config) =>
+    config.url === "/api/health"
+      ? {
+          status: 200,
+          data: { status: "ok", service: "test", timestamp: "" },
+        }
+      : { status: 200, data: { users: [] } },
+  );
+});
 
 const { App } = await import("./App");
 
@@ -45,17 +49,18 @@ async function renderAt(path: string) {
 afterEach(async () => {
   await act(async () => root.unmount());
   container.remove();
+  restoreHttp();
 });
 
 describe("/users routing", () => {
   test("renders the Users page for an admin", async () => {
-    sessionState = { data: { user: { role: "admin", name: "Admin" } }, isPending: false };
+    setSession({ user: { role: "admin", name: "Admin" } });
     const text = await renderAt("/users");
     expect(text).toContain("Users");
   });
 
   test("redirects an agent (non-admin) to the homepage", async () => {
-    sessionState = { data: { user: { role: "agent", name: "Agent" } }, isPending: false };
+    setSession({ user: { role: "agent", name: "Agent" } });
     const text = await renderAt("/users");
     // HomePage renders the "Helpdesk" heading; the Users page heading is absent.
     expect(text).toContain("Helpdesk");
@@ -63,7 +68,7 @@ describe("/users routing", () => {
   });
 
   test("redirects a logged-out visitor to the login page", async () => {
-    sessionState = { data: null, isPending: false };
+    setSession(null);
     const text = await renderAt("/users");
     expect(text).toContain("Sign in");
   });
