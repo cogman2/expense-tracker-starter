@@ -7,6 +7,7 @@ Full-stack helpdesk on **Bun + Express + React + TypeScript**, Prisma/Postgres (
 1. Project Setup 
 - [ ] Initialize monorepo structure (‘/client’, ‘/server’)
 - [ ] Set up Express server with TypeScript
+- [ ] Set up React app with TypeScript
 - [ ] Set up PostgresSQL database
 
 
