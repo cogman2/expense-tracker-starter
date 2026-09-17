@@ -3,6 +3,7 @@
 import type { ReactNode } from "react";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 const mounted: { container: HTMLDivElement; root: Root }[] = [];
 
@@ -27,17 +28,42 @@ export const authClientMock = () => ({
   authClient: {},
 });
 
-// Mounts `ui` and returns its container. The async act() flushes effects (the
-// pages load data in useEffect) and the re-render they trigger, so assertions
-// can run against settled markup.
+// A throwaway client per render. Sharing one would leak cached rows between
+// tests, and retries would make the failure specs slow and flaky — a spec that
+// asserts an error state should not sit through three rounds of backoff first.
+export function createTestQueryClient(): QueryClient {
+  return new QueryClient({
+    defaultOptions: {
+      queries: { retry: false, staleTime: 0, gcTime: 0 },
+      mutations: { retry: false },
+    },
+  });
+}
+
+// Lets pending promises settle and React apply the resulting updates. A query
+// starts during render and resolves a microtask later, so rendering alone does
+// not produce settled markup the way a plain useEffect + setState did.
+export async function flush(): Promise<void> {
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+}
+
+// Mounts `ui` inside a fresh QueryClientProvider, waits for its queries to
+// settle, and returns the container.
 export async function renderComponent(ui: ReactNode): Promise<HTMLDivElement> {
   const container = document.createElement("div");
   document.body.appendChild(container);
   const root = createRoot(container);
   mounted.push({ container, root });
   await act(async () => {
-    root.render(ui);
+    root.render(
+      <QueryClientProvider client={createTestQueryClient()}>
+        {ui}
+      </QueryClientProvider>,
+    );
   });
+  await flush();
   return container;
 }
 

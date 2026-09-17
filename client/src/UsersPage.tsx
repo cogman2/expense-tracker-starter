@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState } from "react";
+import { useState } from "react";
 import { useForm } from "react-hook-form";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { Button } from "@/components/ui/button";
@@ -17,12 +18,8 @@ import {
   FieldLabel,
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import {
-  apiErrorMessage,
-  createUser,
-  getUsers,
-  type UserRow,
-} from "@/lib/api";
+import { apiErrorMessage, createUser, getUsers } from "@/lib/api";
+import { queryKeys } from "@/lib/queryKeys";
 
 const createUserSchema = z.object({
   name: z.string().min(1, "Name is required"),
@@ -35,21 +32,26 @@ type CreateUserValues = z.infer<typeof createUserSchema>;
 
 export function UsersPage() {
   const [createdMessage, setCreatedMessage] = useState<string | null>(null);
-  const [users, setUsers] = useState<UserRow[] | null>(null);
-  const [loadError, setLoadError] = useState<string | null>(null);
+  const queryClient = useQueryClient();
 
-  const loadUsers = useCallback(async () => {
-    setLoadError(null);
-    try {
-      setUsers(await getUsers());
-    } catch {
-      setLoadError("Could not load users.");
-    }
-  }, []);
+  // The signal aborts the read if the page unmounts mid-load, so navigating
+  // away cannot leave a late response to settle into a dead component.
+  const {
+    data: users,
+    isPending,
+    isError,
+  } = useQuery({
+    queryKey: queryKeys.users.all,
+    queryFn: ({ signal }) => getUsers(signal),
+  });
 
-  useEffect(() => {
-    void loadUsers();
-  }, [loadUsers]);
+  const createUserMutation = useMutation({
+    mutationFn: (values: CreateUserValues) => createUser(values),
+    // Refresh the list in place rather than refetching by hand. Invalidating
+    // the broad `users.all` key also covers the filtered lists to come.
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: queryKeys.users.all }),
+  });
 
   const {
     register,
@@ -66,7 +68,7 @@ export function UsersPage() {
   const onSubmit = handleSubmit(async (values) => {
     setCreatedMessage(null);
     try {
-      await createUser(values);
+      await createUserMutation.mutateAsync(values);
     } catch (err) {
       setError("root", {
         message: apiErrorMessage(
@@ -79,8 +81,6 @@ export function UsersPage() {
 
     setCreatedMessage(`Created ${values.role} account for ${values.email}.`);
     reset();
-    // Reflect the new account in the list without a manual reload.
-    void loadUsers();
   });
 
   return (
@@ -88,14 +88,16 @@ export function UsersPage() {
       <h1 className="text-2xl font-bold">Users</h1>
 
       <section className="mt-6">
-        {loadError && <p className="text-sm text-red-600">{loadError}</p>}
-        {!loadError && users === null && (
+        {isError && (
+          <p className="text-sm text-red-600">Could not load users.</p>
+        )}
+        {!isError && isPending && (
           <p className="text-sm text-gray-500">Loading users…</p>
         )}
-        {!loadError && users !== null && users.length === 0 && (
+        {!isError && users && users.length === 0 && (
           <p className="text-sm text-gray-500">No users yet.</p>
         )}
-        {!loadError && users !== null && users.length > 0 && (
+        {!isError && users && users.length > 0 && (
           <div className="max-w-2xl overflow-x-auto">
             <table className="w-full border-collapse text-left text-sm">
               <thead>

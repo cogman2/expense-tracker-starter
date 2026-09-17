@@ -2,7 +2,13 @@ import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter } from "react-router";
-import { authClientMock, setSession } from "./testUtils";
+import { QueryClientProvider } from "@tanstack/react-query";
+import {
+  authClientMock,
+  createTestQueryClient,
+  flush,
+  setSession,
+} from "./testUtils";
 import { fakeHttp, restoreHttp } from "./testHttp";
 
 // Mock the auth client before App (and the guards) are imported. Guards import
@@ -38,11 +44,16 @@ async function renderAt(path: string) {
   // effect) and the resulting re-render to the destination route.
   await act(async () => {
     root.render(
-      <MemoryRouter initialEntries={[path]}>
-        <App />
-      </MemoryRouter>,
+      <QueryClientProvider client={createTestQueryClient()}>
+        <MemoryRouter initialEntries={[path]}>
+          <App />
+        </MemoryRouter>
+      </QueryClientProvider>,
     );
   });
+  // The pages' queries resolve a microtask after render; settle them so the
+  // assertions below see final markup and React logs no act() warning.
+  await flush();
   return container.textContent ?? "";
 }
 

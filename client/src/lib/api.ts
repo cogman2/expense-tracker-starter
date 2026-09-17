@@ -35,30 +35,39 @@ export interface CreateUserInput {
   role: "admin" | "agent";
 }
 
-export async function getHealth(): Promise<ApiHealth> {
-  const { data } = await api.get<ApiHealth>("/api/health");
+// Each helper takes an optional AbortSignal. TanStack Query hands one to every
+// queryFn, so passing it through is what makes an in-flight read abort when the
+// component unmounts or a newer request supersedes it.
+export async function getHealth(signal?: AbortSignal): Promise<ApiHealth> {
+  const { data } = await api.get<ApiHealth>("/api/health", { signal });
   return data;
 }
 
-export async function getUsers(): Promise<UserRow[]> {
-  const { data } = await api.get<{ users: UserRow[] }>("/api/users");
+export async function getUsers(signal?: AbortSignal): Promise<UserRow[]> {
+  const { data } = await api.get<{ users: UserRow[] }>("/api/users", { signal });
   return data.users;
 }
 
 // The create response omits createdAt — only the list endpoint returns it.
 export async function createUser(
   input: CreateUserInput,
+  signal?: AbortSignal,
 ): Promise<Omit<UserRow, "createdAt">> {
   const { data } = await api.post<{ user: Omit<UserRow, "createdAt"> }>(
     "/api/users",
     input,
+    { signal },
   );
   return data.user;
 }
 
 // Surfaces the server's `{ error }` message from a failed response, falling back
-// to `fallback` for network errors or any response without one.
+// to `fallback` for cancellations, network errors, or any response without one.
 export function apiErrorMessage(err: unknown, fallback: string): string {
+  // A cancellation is not a server error — it carries no message worth showing.
+  if (axios.isCancel(err)) {
+    return fallback;
+  }
   if (axios.isAxiosError(err)) {
     const data = err.response?.data as { error?: string } | undefined;
     if (typeof data?.error === "string") {

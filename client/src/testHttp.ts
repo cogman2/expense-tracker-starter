@@ -6,7 +6,7 @@
 // stub becomes every other file's version of the module. The adapter is plain
 // instance state, restorable in afterEach.
 import type { AxiosAdapter, InternalAxiosRequestConfig } from "axios";
-import { AxiosError } from "axios";
+import { AxiosError, CanceledError } from "axios";
 import { api } from "./lib/api";
 
 export interface FakeResponse {
@@ -32,9 +32,28 @@ export function fakeHttp(handler: FakeHandler): void {
   seen = [];
   const adapter: AxiosAdapter = async (config) => {
     seen.push(config);
-    const result = await handler(config);
+    // Cancellation is the adapter's job in axios — the built-in xhr/http/fetch
+    // adapters each subscribe to config.signal themselves — so a fake that
+    // ignored it would leave an aborted request hanging forever.
+    const signal = config.signal as AbortSignal | undefined;
+    const aborted = new Promise<never>((_resolve, reject) => {
+      if (!signal) return;
+      if (signal.aborted) {
+        reject(new CanceledError());
+        return;
+      }
+      signal.addEventListener("abort", () => reject(new CanceledError()), {
+        once: true,
+      });
+    });
+
+    const result = await Promise.race([
+      Promise.resolve(handler(config)),
+      aborted,
+    ]);
     if (result.pending) {
-      return new Promise(() => {});
+      // Settles only if the caller aborts.
+      return aborted;
     }
     const response = {
       data: result.data,

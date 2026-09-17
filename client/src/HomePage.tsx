@@ -1,20 +1,18 @@
-import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
+import { useQuery } from "@tanstack/react-query";
 import { signOut, useSession } from "./auth-client";
-import { getHealth, type ApiHealth } from "@/lib/api";
+import { getHealth } from "@/lib/api";
+import { queryKeys } from "@/lib/queryKeys";
 
 export function HomePage() {
   const { data: session } = useSession();
   const navigate = useNavigate();
 
-  const [health, setHealth] = useState<ApiHealth | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    getHealth()
-      .then(setHealth)
-      .catch((err: unknown) => setError(String(err)));
-  }, []);
+  // The signal aborts this read if the page unmounts before it lands.
+  const { data: health, error } = useQuery({
+    queryKey: queryKeys.health,
+    queryFn: ({ signal }) => getHealth(signal),
+  });
 
   async function handleSignOut() {
     await signOut({
@@ -51,7 +49,9 @@ export function HomePage() {
             {health.timestamp}
           </p>
         )}
-        {error && <p className="mt-2 text-red-600">Server error: {error}</p>}
+        {error && (
+          <p className="mt-2 text-red-600">Server error: {String(error)}</p>
+        )}
       </main>
     </div>
   );

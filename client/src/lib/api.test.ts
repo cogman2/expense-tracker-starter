@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { AxiosError } from "axios";
+import axios, { AxiosError } from "axios";
 import {
   fakeHttp,
   httpCalls,
@@ -126,6 +126,62 @@ describe("non-2xx responses reject", () => {
         role: "agent",
       }),
     ).rejects.toThrow();
+  });
+});
+
+describe("cancellation", () => {
+  test("passes the caller's signal through to axios", async () => {
+    respondWith(200, { users: [] });
+    const controller = new AbortController();
+
+    await getUsers(controller.signal);
+
+    // TanStack Query hands a signal to every queryFn; this is the wiring that
+    // turns it into an actual abortable request.
+    expect(httpCalls()[0]!.signal).toBe(controller.signal);
+  });
+
+  test("createUser accepts a signal too", async () => {
+    respondWith(201, { user: { id: "u", name: "", email: "", role: "agent" } });
+    const controller = new AbortController();
+
+    await createUser(
+      {
+        name: "Ada",
+        email: "ada@example.com",
+        password: "password123",
+        role: "agent",
+      },
+      controller.signal,
+    );
+
+    expect(httpCalls()[0]!.signal).toBe(controller.signal);
+  });
+
+  test("aborting before the response rejects with a cancellation", async () => {
+    // Never settles on its own, so only the abort can end it.
+    fakeHttp(() => new Promise<never>(() => {}));
+    const controller = new AbortController();
+
+    const pending = getUsers(controller.signal);
+    controller.abort();
+
+    await expect(pending).rejects.toThrow();
+    await pending.catch((err: unknown) => {
+      expect(axios.isCancel(err)).toBe(true);
+    });
+  });
+
+  test("a cancelled request reports no error message", async () => {
+    fakeHttp(() => new Promise<never>(() => {}));
+    const controller = new AbortController();
+
+    const pending = getUsers(controller.signal);
+    controller.abort();
+
+    const err = await pending.catch((e: unknown) => e);
+    // UsersPage must not flash "Could not load users." for a read it abandoned.
+    expect(apiErrorMessage(err, "fallback")).toBe("fallback");
   });
 });
 
