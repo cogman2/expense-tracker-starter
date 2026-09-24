@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { act } from "react";
+import { cleanup, screen, within } from "@testing-library/react";
+import userEvent, { type UserEvent } from "@testing-library/user-event";
 import { AxiosError } from "axios";
-import { renderComponent, setInput, unmountAll } from "./testUtils";
+import { renderWithQuery } from "./testRender";
 import {
   fakeHttp,
   httpCalls,
@@ -44,26 +45,31 @@ const validInput: CreateUserInput = {
 const postCalls = () => httpCalls().filter((c) => c.method === "post");
 const getCalls = () => httpCalls().filter((c) => c.method === "get");
 
-// Fills the create-user form from `input`. The fields are driven through
-// setInput so react-hook-form's onChange validation actually sees the values.
-function fillForm(container: HTMLElement, input: CreateUserInput) {
-  const field = <T extends HTMLElement>(id: string) => {
-    const el = container.querySelector<T>(`#${id}`);
-    if (!el) throw new Error(`missing form field #${id}`);
-    return el;
-  };
-  setInput(field<HTMLInputElement>("name"), input.name);
-  setInput(field<HTMLInputElement>("email"), input.email);
-  setInput(field<HTMLInputElement>("password"), input.password);
-  setInput(field<HTMLSelectElement>("role"), input.role);
+// Skeletons are aria-hidden (components/ui/skeleton.tsx) so that they stay out
+// of the accessibility tree — which also puts them out of reach of the role and
+// text queries. Counting the data-slot is the one place these specs go around
+// Testing Library rather than through it.
+const skeletons = (container: HTMLElement) =>
+  container.querySelectorAll('[data-slot="skeleton"]');
+
+// Fills the create-user form the way a person would: typing into each field and
+// picking the role, so react-hook-form's onChange validation runs for real.
+async function fillForm(user: UserEvent, input: CreateUserInput) {
+  await user.type(screen.getByLabelText("Name"), input.name);
+  await user.type(screen.getByLabelText("Email"), input.email);
+  await user.type(screen.getByLabelText("Password"), input.password);
+  await user.selectOptions(screen.getByLabelText("Role"), input.role);
 }
 
-async function submitForm(container: HTMLElement) {
-  const form = container.querySelector("form");
-  if (!form) throw new Error("missing form");
-  await act(async () => {
-    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
-  });
+const submit = (user: UserEvent) =>
+  user.click(screen.getByRole("button", { name: "Create user" }));
+
+// The skeleton renders a table of its own, so findByRole("table") would resolve
+// on it the instant the page mounts. Waiting for a real cell first is what tells
+// the two apart.
+async function findLoadedTable(): Promise<HTMLElement> {
+  await screen.findByRole("cell", { name: rows[0]!.name });
+  return screen.getByRole("table");
 }
 
 beforeEach(() => {
@@ -72,100 +78,153 @@ beforeEach(() => {
   fakeHttp((config) => (config.method === "post" ? onPost() : onGet()));
 });
 
-afterEach(async () => {
-  await unmountAll();
+afterEach(() => {
+  cleanup();
   restoreHttp();
 });
 
 describe("users list", () => {
-  test("shows a loading message while the request is in flight", async () => {
+  test("shows skeleton rows while the request is in flight", async () => {
     onGet = () => ({ status: 200, pending: true });
 
-    const text = (await renderComponent(<UsersPage />)).textContent ?? "";
+    const { container } = renderWithQuery(<UsersPage />);
 
-    expect(text).toContain("Loading users…");
-    expect(text).not.toContain("No users yet.");
+    expect(skeletons(container).length).toBeGreaterThan(0);
+    expect(container.querySelector("section")).toHaveAttribute(
+      "aria-busy",
+      "true",
+    );
+    expect(screen.queryByText("No users yet.")).not.toBeInTheDocument();
   });
 
   test("shows an empty state when there are no users", async () => {
     onGet = () => ({ status: 200, data: { users: [] } });
 
-    const text = (await renderComponent(<UsersPage />)).textContent ?? "";
+    const { container } = renderWithQuery(<UsersPage />);
 
-    expect(text).toContain("No users yet.");
-    expect(text).not.toContain("Loading users…");
+    expect(await screen.findByText("No users yet.")).toBeInTheDocument();
+    // The skeleton must clear, not linger behind the settled content.
+    expect(skeletons(container)).toHaveLength(0);
   });
 
   test("renders a row per user", async () => {
     onGet = () => ({ status: 200, data: { users: rows } });
 
-    const container = await renderComponent(<UsersPage />);
-    const text = container.textContent ?? "";
+    const { container } = renderWithQuery(<UsersPage />);
+    const table = await findLoadedTable();
 
-    expect(container.querySelectorAll("tbody tr")).toHaveLength(2);
-    expect(text).toContain("Ada Admin");
-    expect(text).toContain("ada@example.com");
-    expect(text).toContain("admin");
-    expect(text).toContain("Gene Agent");
-    expect(text).toContain("gene@example.com");
+    expect(skeletons(container)).toHaveLength(0);
+    // Header row plus one per user.
+    expect(within(table).getAllByRole("row")).toHaveLength(3);
+    for (const row of rows) {
+      expect(
+        within(table).getByRole("cell", { name: row.name }),
+      ).toBeInTheDocument();
+      expect(
+        within(table).getByRole("cell", { name: row.email }),
+      ).toBeInTheDocument();
+      expect(
+        within(table).getByRole("cell", { name: row.role }),
+      ).toBeInTheDocument();
+    }
+  });
+
+  test("declares identical columns while loading and once loaded", async () => {
+    onGet = () => ({ status: 200, pending: true });
+    const loading = renderWithQuery(<UsersPage />).container;
+    const loadingColumns = loading.querySelector("colgroup")?.outerHTML;
+    cleanup();
+
+    onGet = () => ({ status: 200, data: { users: rows } });
+    const loaded = renderWithQuery(<UsersPage />).container;
+    await findLoadedTable();
+    const loadedColumns = loaded.querySelector("colgroup")?.outerHTML;
+
+    // The two tables share one COLUMNS definition; if someone edits one and not
+    // the other, the columns resize as the skeleton gives way to data.
+    expect(loadingColumns).toBeDefined();
+    expect(loadedColumns).toBe(loadingColumns!);
+    // table-fixed is what makes the declared widths bind instead of the browser
+    // re-measuring from cell content.
+    expect(loaded.querySelector("table")).toHaveClass("table-fixed");
   });
 
   test("shows an error message when the request is rejected", async () => {
     onGet = () => ({ status: 403, data: { error: "forbidden" } });
 
-    const container = await renderComponent(<UsersPage />);
+    renderWithQuery(<UsersPage />);
 
-    expect(container.textContent ?? "").toContain("Could not load users.");
-    expect(container.querySelector("table")).toBeNull();
+    expect(await screen.findByText("Could not load users.")).toBeInTheDocument();
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
   });
 });
 
 describe("create user form", () => {
   test("submits the form values and refreshes the list", async () => {
-    const container = await renderComponent(<UsersPage />);
+    const user = userEvent.setup();
+    renderWithQuery(<UsersPage />);
+    await screen.findByText("No users yet.");
     expect(getCalls()).toHaveLength(1);
 
-    fillForm(container, validInput);
+    await fillForm(user, validInput);
     onGet = () => ({ status: 200, data: { users: rows } });
-    await submitForm(container);
+    await submit(user);
 
     expect(postCalls()).toHaveLength(1);
     expect(JSON.parse(postCalls()[0]!.data as string)).toEqual(validInput);
-    expect(container.textContent ?? "").toContain(
-      `Created agent account for ${validInput.email}.`,
-    );
-    // The list reloads in place — no page refresh (UsersPage.tsx:96).
+    expect(
+      await screen.findByText(`Created agent account for ${validInput.email}.`),
+    ).toBeInTheDocument();
+    // The list reloads in place — no page refresh (UsersPage.tsx:120).
     expect(getCalls()).toHaveLength(2);
-    expect(container.querySelectorAll("tbody tr")).toHaveLength(2);
+    const table = await findLoadedTable();
+    expect(within(table).getAllByRole("row")).toHaveLength(3);
+  });
+
+  test("disables the submit button while the creation is in flight", async () => {
+    const user = userEvent.setup();
+    onPost = () => ({ status: 201, pending: true });
+
+    renderWithQuery(<UsersPage />);
+    await screen.findByText("No users yet.");
+    await fillForm(user, validInput);
+    await submit(user);
+
+    const button = await screen.findByRole("button", { name: "Creating…" });
+    expect(button).toBeDisabled();
   });
 
   test("surfaces the server's error message when creation fails", async () => {
+    const user = userEvent.setup();
     const message = "a user with that email already exists";
     onPost = () => ({ status: 409, data: { error: message } });
 
-    const container = await renderComponent(<UsersPage />);
-    fillForm(container, validInput);
-    await submitForm(container);
+    renderWithQuery(<UsersPage />);
+    await screen.findByText("No users yet.");
+    await fillForm(user, validInput);
+    await submit(user);
 
     // Goes through the real apiErrorMessage against a real AxiosError.
-    expect(container.textContent ?? "").toContain(message);
-    expect(container.textContent ?? "").not.toContain("Could not create");
+    expect(await screen.findByText(message)).toBeInTheDocument();
+    expect(screen.queryByText(/Could not create/)).not.toBeInTheDocument();
     // A failed create must not claim success or reload the list.
-    expect(container.textContent ?? "").not.toContain("Created agent account");
+    expect(screen.queryByText(/Created agent account/)).not.toBeInTheDocument();
     expect(getCalls()).toHaveLength(1);
   });
 
   test("falls back to a generic message when the failure carries no error body", async () => {
+    const user = userEvent.setup();
     onPost = () => {
       throw new AxiosError("Network Error", AxiosError.ERR_NETWORK);
     };
 
-    const container = await renderComponent(<UsersPage />);
-    fillForm(container, validInput);
-    await submitForm(container);
+    renderWithQuery(<UsersPage />);
+    await screen.findByText("No users yet.");
+    await fillForm(user, validInput);
+    await submit(user);
 
-    expect(container.textContent ?? "").toContain(
-      "Could not create the user. Please try again.",
-    );
+    expect(
+      await screen.findByText("Could not create the user. Please try again."),
+    ).toBeInTheDocument();
   });
 });

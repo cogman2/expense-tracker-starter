@@ -10,10 +10,21 @@ const mounted: { container: HTMLDivElement; root: Root }[] = [];
 type Session = { user: { role: "admin" | "agent"; name: string } } | null;
 
 let session: Session = null;
+let sessionPending = false;
 
-/** Sets the session the mocked useSession reports. Call before rendering. */
+/**
+ * Sets the session the mocked useSession reports, and clears the pending flag —
+ * a resolved session is the common case, so tests do not have to say so.
+ */
 export function setSession(next: Session): void {
   session = next;
+  sessionPending = false;
+}
+
+/** Holds useSession in its pending state, for the route guards' loading UI. */
+export function setSessionPending(): void {
+  session = null;
+  sessionPending = true;
 }
 
 // Every spec that mocks "./auth-client" must use this same factory. mock.module
@@ -22,7 +33,7 @@ export function setSession(next: Session): void {
 // backed by module-level state means whichever registration wins behaves the
 // same, and each test still drives it through setSession.
 export const authClientMock = () => ({
-  useSession: () => ({ data: session, isPending: false }),
+  useSession: () => ({ data: session, isPending: sessionPending }),
   signIn: { email: async () => ({ error: null }) },
   signOut: async () => {},
   authClient: {},

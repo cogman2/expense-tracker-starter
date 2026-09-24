@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { useForm } from "react-hook-form";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -18,6 +18,7 @@ import {
   FieldLabel,
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import { Skeleton } from "@/components/ui/skeleton";
 import { apiErrorMessage, createUser, getUsers } from "@/lib/api";
 import { queryKeys } from "@/lib/queryKeys";
 
@@ -29,6 +30,73 @@ const createUserSchema = z.object({
 });
 
 type CreateUserValues = z.infer<typeof createUserSchema>;
+
+const SKELETON_ROWS = 3;
+
+// One definition for both the skeleton and the real table. The widths are
+// declared here and applied through a <colgroup> under `table-fixed`, rather
+// than left to the browser to derive from cell content: an auto-layout table
+// re-measures its columns whenever the content changes, which made every column
+// boundary jump as the skeleton gave way to data (the Name column went 185px ->
+// 115px) and made the loaded table reflow whenever a long name or email landed.
+// `bar` is the placeholder width, sized so the skeleton reads as names, emails
+// and roles rather than four identical strips.
+const COLUMNS = [
+  { label: "Name", width: "w-[30%]", bar: "w-28" },
+  { label: "Email", width: "w-[38%]", bar: "w-40" },
+  { label: "Role", width: "w-[14%]", bar: "w-16" },
+  { label: "Created", width: "w-[18%]", bar: "w-20" },
+] as const;
+
+const cellPadding = (index: number) =>
+  index === COLUMNS.length - 1 ? "py-2" : "py-2 pr-4";
+
+// The wrapper, column widths and header row, shared so the loading and loaded
+// tables cannot drift apart. Callers supply only the <tbody>.
+function UsersTableFrame({ children }: { children: ReactNode }) {
+  return (
+    <div className="max-w-2xl overflow-x-auto">
+      <table className="w-full table-fixed border-collapse text-left text-sm">
+        <colgroup>
+          {COLUMNS.map((column) => (
+            <col key={column.label} className={column.width} />
+          ))}
+        </colgroup>
+        <thead>
+          <tr className="border-b border-gray-200 text-gray-500">
+            {COLUMNS.map((column, index) => (
+              <th
+                key={column.label}
+                className={`${cellPadding(index)} font-medium`}
+              >
+                {column.label}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        {children}
+      </table>
+    </div>
+  );
+}
+
+function UsersTableSkeleton() {
+  return (
+    <UsersTableFrame>
+      <tbody>
+        {Array.from({ length: SKELETON_ROWS }, (_, row) => (
+          <tr key={row} className="border-b border-gray-100">
+            {COLUMNS.map((column, index) => (
+              <td key={column.label} className={cellPadding(index)}>
+                <Skeleton className={`h-4 ${column.bar}`} />
+              </td>
+            ))}
+          </tr>
+        ))}
+      </tbody>
+    </UsersTableFrame>
+  );
+}
 
 export function UsersPage() {
   const [createdMessage, setCreatedMessage] = useState<string | null>(null);
@@ -87,41 +155,29 @@ export function UsersPage() {
     <main className="p-8 font-sans text-gray-900">
       <h1 className="text-2xl font-bold">Users</h1>
 
-      <section className="mt-6">
+      <section className="mt-6" aria-busy={isPending}>
         {isError && (
           <p className="text-sm text-red-600">Could not load users.</p>
         )}
-        {!isError && isPending && (
-          <p className="text-sm text-gray-500">Loading users…</p>
-        )}
+        {!isError && isPending && <UsersTableSkeleton />}
         {!isError && users && users.length === 0 && (
           <p className="text-sm text-gray-500">No users yet.</p>
         )}
         {!isError && users && users.length > 0 && (
-          <div className="max-w-2xl overflow-x-auto">
-            <table className="w-full border-collapse text-left text-sm">
-              <thead>
-                <tr className="border-b border-gray-200 text-gray-500">
-                  <th className="py-2 pr-4 font-medium">Name</th>
-                  <th className="py-2 pr-4 font-medium">Email</th>
-                  <th className="py-2 pr-4 font-medium">Role</th>
-                  <th className="py-2 font-medium">Created</th>
+          <UsersTableFrame>
+            <tbody>
+              {users.map((u) => (
+                <tr key={u.id} className="border-b border-gray-100">
+                  <td className={cellPadding(0)}>{u.name}</td>
+                  <td className={cellPadding(1)}>{u.email}</td>
+                  <td className={cellPadding(2)}>{u.role}</td>
+                  <td className={cellPadding(3)}>
+                    {new Date(u.createdAt).toLocaleDateString()}
+                  </td>
                 </tr>
-              </thead>
-              <tbody>
-                {users.map((u) => (
-                  <tr key={u.id} className="border-b border-gray-100">
-                    <td className="py-2 pr-4">{u.name}</td>
-                    <td className="py-2 pr-4">{u.email}</td>
-                    <td className="py-2 pr-4">{u.role}</td>
-                    <td className="py-2">
-                      {new Date(u.createdAt).toLocaleDateString()}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+              ))}
+            </tbody>
+          </UsersTableFrame>
         )}
       </section>
 

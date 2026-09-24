@@ -8,6 +8,7 @@ import {
   createTestQueryClient,
   flush,
   setSession,
+  setSessionPending,
 } from "./testUtils";
 import { fakeHttp, restoreHttp } from "./testHttp";
 
@@ -57,6 +58,10 @@ async function renderAt(path: string) {
   return container.textContent ?? "";
 }
 
+function skeletonCount() {
+  return container.querySelectorAll('[data-slot="skeleton"]').length;
+}
+
 afterEach(async () => {
   await act(async () => root.unmount());
   container.remove();
@@ -82,5 +87,17 @@ describe("/users routing", () => {
     setSession(null);
     const text = await renderAt("/users");
     expect(text).toContain("Sign in");
+  });
+
+  test("shows a page skeleton while the session is still resolving", async () => {
+    setSessionPending();
+
+    const text = await renderAt("/users");
+
+    expect(skeletonCount()).toBeGreaterThan(0);
+    // Critically, it must not decide yet: redirecting before the session
+    // resolves would bounce a signed-in admin to the login page on every load.
+    expect(text).not.toContain("Sign in");
+    expect(text).not.toContain("Create user");
   });
 });
