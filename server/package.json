@@ -8,6 +8,7 @@
     "start": "bun run src/index.ts",
     "build": "bun build src/index.ts --target=bun --outdir=dist",
     "typecheck": "tsc --noEmit",
+    "test": "bun test",
     "db:seed": "bun run prisma/seed.ts"
   },
   "dependencies": {
@@ -16,7 +17,8 @@
     "better-auth": "^1.6.20",
     "cors": "^2.8.6",
     "express": "^4.21.2",
-    "express-rate-limit": "^8.6.0"
+    "express-rate-limit": "^8.6.0",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/cors": "^2.8.19",

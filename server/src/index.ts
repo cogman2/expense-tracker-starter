@@ -4,7 +4,7 @@ import { auth } from "./auth";
 import { requireAuth, requireAdmin } from "./require-auth";
 import { authRateLimiter, signInRateLimiter } from "./rate-limit";
 import { prisma } from "./db";
-import { Role } from "./generated/prisma/enums";
+import { createUserBodySchema, firstIssueMessage } from "./schemas";
 
 export interface ApiHealth {
   status: "ok";
@@ -76,16 +76,6 @@ app.get("/api/me", requireAuth, (req, res) => {
   res.json({ user: req.auth!.user });
 });
 
-// Admin-only user creation. Public sign-up is disabled (see src/auth.ts), so
-// admins provision accounts here. Mirrors prisma/seed.ts: the user is created
-// through Better Auth's internal adapter and the password hashed with Better
-// Auth's own hasher, so credential sign-in works. requireAdmin enforces the
-// authorization server-side — the client route guard is UX only.
-const VALID_ROLES = Object.values(Role) as string[];
-const MIN_PASSWORD_LENGTH = 8;
-// Basic shape check; Better Auth / the DB remain the source of truth.
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
 // Admin-only user list. Explicit `select` (never raw rows) keeps the response
 // to safe fields — no password hash (which lives on Account, not User) or
 // session data can leak.
@@ -97,32 +87,20 @@ app.get("/api/users", requireAuth, requireAdmin, async (_req, res) => {
   res.json({ users });
 });
 
+// Admin-only user creation. Public sign-up is disabled (see src/auth.ts), so
+// admins provision accounts here. Mirrors prisma/seed.ts: the user is created
+// through Better Auth's internal adapter and the password hashed with Better
+// Auth's own hasher, so credential sign-in works. requireAdmin enforces the
+// authorization server-side — the client route guard is UX only.
 app.post("/api/users", requireAuth, requireAdmin, async (req, res) => {
-  const body = (req.body ?? {}) as Record<string, unknown>;
-  const name = typeof body.name === "string" ? body.name.trim() : "";
-  const emailRaw = typeof body.email === "string" ? body.email.trim() : "";
-  const email = emailRaw.toLowerCase();
-  const password = typeof body.password === "string" ? body.password : "";
-  const role = typeof body.role === "string" ? body.role : "";
-
-  if (!name) {
-    res.status(400).json({ error: "name is required" });
+  // The schema trims the name, lowercases the email and narrows the role, so
+  // everything below works with clean values (src/schemas.ts).
+  const parsed = createUserBodySchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: firstIssueMessage(parsed.error) });
     return;
   }
-  if (!EMAIL_RE.test(email)) {
-    res.status(400).json({ error: "a valid email is required" });
-    return;
-  }
-  if (password.length < MIN_PASSWORD_LENGTH) {
-    res.status(400).json({
-      error: `password must be at least ${MIN_PASSWORD_LENGTH} characters`,
-    });
-    return;
-  }
-  if (!VALID_ROLES.includes(role)) {
-    res.status(400).json({ error: `role must be one of ${VALID_ROLES.join(", ")}` });
-    return;
-  }
+  const { name, email, password, role } = parsed.data;
 
   const ctx = await auth.$context;
 
@@ -135,7 +113,7 @@ app.post("/api/users", requireAuth, requireAdmin, async (req, res) => {
   const user = await ctx.internalAdapter.createUser({
     email,
     name,
-    role: role as Role,
+    role,
     emailVerified: true,
   });
 

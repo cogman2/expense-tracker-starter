@@ -11,10 +11,33 @@ Bun workspace ("helpdesk"): `client/` (React + React Router + Vite) and
 - `bun run typecheck` — type-check client, server, **and** the e2e/config files.
 - `bun run test:e2e` — Playwright end-to-end suite (see below).
 
+## Validation
+
+Untrusted input is validated with **zod** at the boundary it enters.
+
+- **Server (the authority)** — request-body schemas live in `server/src/schemas.ts`.
+  Routes `safeParse` the body and answer `400 { error }` with
+  `firstIssueMessage(parsed.error)`; field order in the schema decides which
+  message a multiply-invalid body gets. Give new endpoints a schema there rather
+  than hand-checking fields in the route. Schemas also normalize (trim the name,
+  lowercase the email) and narrow enums off the Prisma types
+  (`z.enum(Role, …)`), so handlers work with clean, typed values.
+- **Client (UX only)** — form schemas live with their component and reach
+  react-hook-form through `zodResolver` (`client/src/UsersPage.tsx`,
+  `client/src/LoginPage.tsx`). They never stand in for server validation.
+- API **responses** are typed but not parsed (`client/src/lib/api.ts` casts them) —
+  a deliberate current limit, worth revisiting if the payloads start to drift.
+- The 400 messages are part of the API: `e2e/user-creation.spec.ts` asserts their
+  wording, and `server/src/schemas.test.ts` pins the parsing rules. Changing a
+  message means updating both.
+
 ## Testing
 
-The repo has two kinds of tests:
+The repo has three kinds of tests:
 
+- **Server unit tests** — `bun test` inside `server/` (or
+  `bun run --filter server test`) covers pure logic such as the request-body
+  schemas in `server/src/schemas.test.ts`. No database needed.
 - **Component / unit tests** — `bun test`, run in the client workspace with
   happy-dom preloaded (`client/bunfig.toml`). Specs are `client/src/*.test.tsx`
   (e.g. `App.routing.test.tsx`). Run with `bun run --filter client test` from the
