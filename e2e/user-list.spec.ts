@@ -1,8 +1,8 @@
 import { expect, test } from "@playwright/test";
 import { ADMIN, AGENT, loginAndWaitForHome } from "./auth-helpers";
 
-// Covers GET /api/users (server/src/index.ts) and the user list table on the
-// admin-only /users page (client/src/UsersPage.tsx).
+// Covers GET /api/users (server/src/routes/users.ts) and the user list table on
+// the admin-only /users page (client/src/UsersPage.tsx).
 //
 // NOTE on tooling: like e2e/api-auth.spec.ts and e2e/user-creation.spec.ts,
 // the server-side checks here use the runtime's native `fetch()` instead of

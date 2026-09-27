@@ -4,7 +4,8 @@ import { ADMIN, AGENT } from "./auth-helpers";
 // Server-side enforcement checks, hitting the Express/Better Auth server
 // directly on :3000 rather than going through the SPA. This confirms the API
 // itself is protected — not just that the client-side router guard hides the
-// UI — per server/src/require-auth.ts and server/src/index.ts's /api/me route.
+// UI — per server/src/require-auth.ts and server/src/routes/users.ts's /api/me
+// route.
 //
 // NOTE on tooling: this suite intentionally uses the runtime's native
 // `fetch()` instead of Playwright's `request` fixture / APIRequestContext.
@@ -63,7 +64,7 @@ test.describe("Server-side auth enforcement", () => {
     expect(body.user.email).toBe(ADMIN.email);
     expect(body.user.role).toBe("admin");
     // The endpoint must never leak the raw session token/object, only the
-    // user profile (see server/src/index.ts's comment on /api/me).
+    // user profile (see server/src/routes/users.ts's comment on /api/me).
     expect(body).not.toHaveProperty("session");
     expect(body.user).not.toHaveProperty("token");
   });

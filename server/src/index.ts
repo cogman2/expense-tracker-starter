@@ -1,11 +1,9 @@
 import express from "express";
 import { toNodeHandler } from "better-auth/node";
 import { auth } from "./auth";
-import { requireAuth, requireAdmin } from "./require-auth";
 import { authRateLimiter, signInRateLimiter } from "./rate-limit";
 import { prisma } from "./db";
-import { createUserSchema } from "core";
-import { firstIssueMessage } from "./schemas";
+import { usersRouter } from "./routes/users";
 
 export interface ApiHealth {
   status: "ok";
@@ -69,69 +67,9 @@ app.get("/ready", async (_req, res) => {
   }
 });
 
-// Example protected route: requireAuth gates it, and req.auth holds the
-// authenticated session/user.
-app.get("/api/me", requireAuth, (req, res) => {
-  // Return only the user profile — never the session object, which contains
-  // the raw session token (the same secret as the httpOnly cookie).
-  res.json({ user: req.auth!.user });
-});
-
-// Admin-only user list. Explicit `select` (never raw rows) keeps the response
-// to safe fields — no password hash (which lives on Account, not User) or
-// session data can leak.
-app.get("/api/users", requireAuth, requireAdmin, async (_req, res) => {
-  const users = await prisma.user.findMany({
-    select: { id: true, name: true, email: true, role: true, createdAt: true },
-    orderBy: { createdAt: "asc" },
-  });
-  res.json({ users });
-});
-
-// Admin-only user creation. Public sign-up is disabled (see src/auth.ts), so
-// admins provision accounts here. Mirrors prisma/seed.ts: the user is created
-// through Better Auth's internal adapter and the password hashed with Better
-// Auth's own hasher, so credential sign-in works. requireAdmin enforces the
-// authorization server-side — the client route guard is UX only.
-app.post("/api/users", requireAuth, requireAdmin, async (req, res) => {
-  // One schema shared with the client's form (core/src/users.ts). It trims the
-  // name, lowercases the email and narrows the role, so everything below works
-  // with clean values.
-  const parsed = createUserSchema.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ error: firstIssueMessage(parsed.error) });
-    return;
-  }
-  const { name, email, password, role } = parsed.data;
-
-  const ctx = await auth.$context;
-
-  const existing = await ctx.internalAdapter.findUserByEmail(email);
-  if (existing) {
-    res.status(409).json({ error: "a user with that email already exists" });
-    return;
-  }
-
-  const user = await ctx.internalAdapter.createUser({
-    email,
-    name,
-    role,
-    emailVerified: true,
-  });
-
-  const hash = await ctx.password.hash(password);
-  await ctx.internalAdapter.linkAccount({
-    userId: user.id,
-    providerId: "credential",
-    accountId: user.id,
-    password: hash,
-  });
-
-  // Return only safe fields — never the password hash or session data.
-  res.status(201).json({
-    user: { id: user.id, name: user.name, email: user.email, role: user.role },
-  });
-});
+// The user routes (profile + admin user administration) live in their own
+// module. Mounted after express.json(), which its POST handler depends on.
+app.use(usersRouter);
 
 const server = app.listen(PORT, () => {
   console.log(`[server] listening on http://localhost:${PORT}`);

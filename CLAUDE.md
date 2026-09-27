@@ -33,8 +33,11 @@ duplication is what the package exists to prevent. In practice:
   messages for the API, since the server returns them verbatim and the form shows
   the same strings. Unit-test the rules next to the schema
   (`core/src/users.test.ts`) — no database or DOM needed.
-- **Server (the authority)** — routes `safeParse` the body against the core schema
-  and answer `400 { error }` with `firstIssueMessage(parsed.error)`
+- **Server (the authority)** — routes live in `server/src/routes/` (one module per
+  resource, an `express.Router` mounted by `server/src/index.ts`, which keeps only
+  the wiring and the `/health` + `/ready` ops endpoints). They `safeParse` the body
+  against the core schema and answer `400 { error }` with
+  `firstIssueMessage(parsed.error)`
   (`server/src/schemas.ts`); field order in the schema decides which message a
   multiply-invalid body gets. Schemas normalize (trim the name, lowercase the
   email) and narrow enums, so handlers work with clean, typed values. Where a core

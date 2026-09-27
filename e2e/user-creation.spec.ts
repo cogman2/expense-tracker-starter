@@ -1,8 +1,8 @@
 import { expect, test } from "@playwright/test";
 import { ADMIN, AGENT, loginAndWaitForHome } from "./auth-helpers";
 
-// Covers POST /api/users (server/src/index.ts) and the "Create user" form on
-// the admin-only /users page (client/src/UsersPage.tsx).
+// Covers POST /api/users (server/src/routes/users.ts) and the "Create user"
+// form on the admin-only /users page (client/src/UsersPage.tsx).
 //
 // NOTE on tooling: like e2e/api-auth.spec.ts, the server-side checks here use
 // the runtime's native `fetch()` instead of Playwright's `request` fixture /
