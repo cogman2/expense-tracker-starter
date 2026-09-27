@@ -2,7 +2,8 @@ import { useState, type ReactNode } from "react";
 import { useForm } from "react-hook-form";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { z } from "zod";
+// Shared with the server, which validates the same payload (core/src/users.ts).
+import { createUserSchema, type CreateUserInput } from "core";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -21,15 +22,6 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { apiErrorMessage, createUser, getUsers } from "@/lib/api";
 import { queryKeys } from "@/lib/queryKeys";
-
-const createUserSchema = z.object({
-  name: z.string().min(1, "Name is required"),
-  email: z.email("Enter a valid email"),
-  password: z.string().min(8, "Password must be at least 8 characters"),
-  role: z.enum(["admin", "agent"]),
-});
-
-type CreateUserValues = z.infer<typeof createUserSchema>;
 
 const SKELETON_ROWS = 3;
 
@@ -114,7 +106,7 @@ export function UsersPage() {
   });
 
   const createUserMutation = useMutation({
-    mutationFn: (values: CreateUserValues) => createUser(values),
+    mutationFn: (values: CreateUserInput) => createUser(values),
     // Refresh the list in place rather than refetching by hand. Invalidating
     // the broad `users.all` key also covers the filtered lists to come.
     onSuccess: () =>
@@ -127,7 +119,7 @@ export function UsersPage() {
     reset,
     setError,
     formState: { errors, isSubmitting },
-  } = useForm<CreateUserValues>({
+  } = useForm<CreateUserInput>({
     resolver: zodResolver(createUserSchema),
     defaultValues: { name: "", email: "", password: "", role: "agent" },
     mode: "onChange",

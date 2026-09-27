@@ -4,7 +4,8 @@ import { auth } from "./auth";
 import { requireAuth, requireAdmin } from "./require-auth";
 import { authRateLimiter, signInRateLimiter } from "./rate-limit";
 import { prisma } from "./db";
-import { createUserBodySchema, firstIssueMessage } from "./schemas";
+import { createUserSchema } from "core";
+import { firstIssueMessage } from "./schemas";
 
 export interface ApiHealth {
   status: "ok";
@@ -93,9 +94,10 @@ app.get("/api/users", requireAuth, requireAdmin, async (_req, res) => {
 // Auth's own hasher, so credential sign-in works. requireAdmin enforces the
 // authorization server-side — the client route guard is UX only.
 app.post("/api/users", requireAuth, requireAdmin, async (req, res) => {
-  // The schema trims the name, lowercases the email and narrows the role, so
-  // everything below works with clean values (src/schemas.ts).
-  const parsed = createUserBodySchema.safeParse(req.body);
+  // One schema shared with the client's form (core/src/users.ts). It trims the
+  // name, lowercases the email and narrows the role, so everything below works
+  // with clean values.
+  const parsed = createUserSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: firstIssueMessage(parsed.error) });
     return;
