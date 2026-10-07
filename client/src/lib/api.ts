@@ -1,0 +1,93 @@
+// The client's HTTP layer. Every call to our own Express API goes through here
+// (Better Auth is the exception — it ships its own fetch layer, see auth-client).
+import axios from "axios";
+import type { CreateUserInput, UpdateUserInput } from "core";
+
+// No baseURL: paths are written out in full so the Vite dev proxy rules apply as
+// written. The proxy treats them asymmetrically — `/api/users`, `/api/me` and
+// `/api/auth` are forwarded untouched, while the generic `/api` rule strips the
+// prefix (`/api/health` -> server `/health`) — so a baseURL of "/api" would
+// quietly send /health somewhere else.
+export const api = axios.create({
+  headers: { "Content-Type": "application/json" },
+  // Same-origin today, but makes the session cookie explicit: the server's
+  // requireAdmin guard authorizes off it.
+  withCredentials: true,
+});
+
+export interface ApiHealth {
+  status: "ok";
+  service: string;
+  timestamp: string;
+}
+
+export interface UserRow {
+  id: string;
+  name: string;
+  email: string;
+  role: "admin" | "agent";
+  createdAt: string;
+}
+
+// The user payloads are defined once, in the package both sides import
+// (core/src/users.ts), so this module cannot describe a body the server rejects.
+// Re-exported because callers (UsersPage, the specs) import them from here.
+export type { CreateUserInput, UpdateUserInput };
+
+// Each helper takes an optional AbortSignal. TanStack Query hands one to every
+// queryFn, so passing it through is what makes an in-flight read abort when the
+// component unmounts or a newer request supersedes it.
+export async function getHealth(signal?: AbortSignal): Promise<ApiHealth> {
+  const { data } = await api.get<ApiHealth>("/api/health", { signal });
+  return data;
+}
+
+export async function getUsers(signal?: AbortSignal): Promise<UserRow[]> {
+  const { data } = await api.get<{ users: UserRow[] }>("/api/users", { signal });
+  return data.users;
+}
+
+// The create response omits createdAt — only the list endpoint returns it.
+export async function createUser(
+  input: CreateUserInput,
+  signal?: AbortSignal,
+): Promise<Omit<UserRow, "createdAt">> {
+  const { data } = await api.post<{ user: Omit<UserRow, "createdAt"> }>(
+    "/api/users",
+    input,
+    { signal },
+  );
+  return data.user;
+}
+
+// Edits name, email and role. Like create, the response omits createdAt — only
+// the list endpoint reports it — so callers refresh the list rather than patching
+// the returned row into place.
+export async function updateUser(
+  id: string,
+  input: UpdateUserInput,
+  signal?: AbortSignal,
+): Promise<Omit<UserRow, "createdAt">> {
+  const { data } = await api.patch<{ user: Omit<UserRow, "createdAt"> }>(
+    `/api/users/${id}`,
+    input,
+    { signal },
+  );
+  return data.user;
+}
+
+// Surfaces the server's `{ error }` message from a failed response, falling back
+// to `fallback` for cancellations, network errors, or any response without one.
+export function apiErrorMessage(err: unknown, fallback: string): string {
+  // A cancellation is not a server error — it carries no message worth showing.
+  if (axios.isCancel(err)) {
+    return fallback;
+  }
+  if (axios.isAxiosError(err)) {
+    const data = err.response?.data as { error?: string } | undefined;
+    if (typeof data?.error === "string") {
+      return data.error;
+    }
+  }
+  return fallback;
+}
