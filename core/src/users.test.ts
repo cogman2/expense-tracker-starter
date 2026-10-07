@@ -1,5 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { createUserSchema, MIN_PASSWORD_LENGTH, ROLES } from "./users";
+import {
+  createUserSchema,
+  MIN_PASSWORD_LENGTH,
+  ROLES,
+  updateUserSchema,
+} from "./users";
 
 const valid = {
   name: "New Person",
@@ -77,6 +82,54 @@ describe("createUserSchema", () => {
     expect(messageFor({ ...valid, name: 42 })).toBe("name is required");
     expect(messageFor({ ...valid, password: null })).toBe(
       "password must be at least 8 characters",
+    );
+  });
+});
+
+describe("updateUserSchema", () => {
+  // It is createUserSchema minus the password, so the shared rules are already
+  // covered above. These cases pin what .omit() changes, and that the inherited
+  // rules really did come along.
+  const { password, ...withoutPassword } = valid;
+
+  test("accepts a payload with no password", () => {
+    expect(updateUserSchema.parse(withoutPassword)).toEqual(withoutPassword);
+  });
+
+  test("ignores a password if one is sent", () => {
+    const parsed = updateUserSchema.parse({ ...withoutPassword, password: "x" });
+
+    expect(parsed).not.toHaveProperty("password");
+  });
+
+  test("still trims the name and lowercases the email", () => {
+    const parsed = updateUserSchema.parse({
+      ...withoutPassword,
+      name: "  New Person  ",
+      email: "  Ada@Example.COM  ",
+    });
+
+    expect(parsed.name).toBe("New Person");
+    expect(parsed.email).toBe("ada@example.com");
+  });
+
+  test("still rejects an unparseable email and a bad role", () => {
+    const badEmail = updateUserSchema.safeParse({
+      ...withoutPassword,
+      email: "not-an-email",
+    });
+    const badRole = updateUserSchema.safeParse({
+      ...withoutPassword,
+      role: "superuser",
+    });
+
+    expect(badEmail.success).toBe(false);
+    expect(badEmail.success || badEmail.error.issues[0]!.message).toBe(
+      "a valid email is required",
+    );
+    expect(badRole.success).toBe(false);
+    expect(badRole.success || badRole.error.issues[0]!.message).toBe(
+      `role must be one of ${ROLES.join(", ")}`,
     );
   });
 });

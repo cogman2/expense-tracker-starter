@@ -1,9 +1,20 @@
-import { useState, type ReactNode } from "react";
+import {
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type ReactNode,
+} from "react";
 import { useForm } from "react-hook-form";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { zodResolver } from "@hookform/resolvers/zod";
 // Shared with the server, which validates the same payload (core/src/users.ts).
-import { createUserSchema, type CreateUserInput } from "core";
+import {
+  createUserSchema,
+  updateUserSchema,
+  ROLES,
+  type CreateUserInput,
+  type UpdateUserInput,
+} from "core";
+import { Check, Pencil, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -20,7 +31,13 @@ import {
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
-import { apiErrorMessage, createUser, getUsers } from "@/lib/api";
+import {
+  apiErrorMessage,
+  createUser,
+  getUsers,
+  updateUser,
+  type UserRow,
+} from "@/lib/api";
 import { queryKeys } from "@/lib/queryKeys";
 
 const SKELETON_ROWS = 3;
@@ -33,11 +50,15 @@ const SKELETON_ROWS = 3;
 // 115px) and made the loaded table reflow whenever a long name or email landed.
 // `bar` is the placeholder width, sized so the skeleton reads as names, emails
 // and roles rather than four identical strips.
+// `srOnlyLabel` marks a column whose header is for assistive tech only — the
+// actions column shows icon buttons, so a visible "Actions" heading would be
+// noise, but a blank <th> leaves the column unnamed.
 const COLUMNS = [
-  { label: "Name", width: "w-[30%]", bar: "w-28" },
-  { label: "Email", width: "w-[38%]", bar: "w-40" },
+  { label: "Name", width: "w-[28%]", bar: "w-28" },
+  { label: "Email", width: "w-[34%]", bar: "w-40" },
   { label: "Role", width: "w-[14%]", bar: "w-16" },
-  { label: "Created", width: "w-[18%]", bar: "w-20" },
+  { label: "Created", width: "w-[14%]", bar: "w-20" },
+  { label: "Actions", width: "w-[10%]", bar: "w-8", srOnlyLabel: true },
 ] as const;
 
 const cellPadding = (index: number) =>
@@ -61,7 +82,11 @@ function UsersTableFrame({ children }: { children: ReactNode }) {
                 key={column.label}
                 className={`${cellPadding(index)} font-medium`}
               >
-                {column.label}
+                {"srOnlyLabel" in column ? (
+                  <span className="sr-only">{column.label}</span>
+                ) : (
+                  column.label
+                )}
               </th>
             ))}
           </tr>
@@ -90,8 +115,156 @@ function UsersTableSkeleton() {
   );
 }
 
+// The row editor's role picker, styled like the create form's select but sized
+// for a fixed-width table cell (full width, tighter padding).
+const ROW_SELECT_CLASS =
+  "h-9 w-full rounded-md border border-input bg-transparent px-2 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50";
+
+// One row in edit mode. It owns its own useForm against the shared update schema
+// (the same wiring as the create form, per CLAUDE.md), so opening a row never
+// disturbs the create form's state and the two sets of field errors stay apart.
+//
+// Rendered with key={user.id} by the caller, which is what guarantees fresh
+// defaultValues when a different row is opened.
+function UserRowEditor({
+  user,
+  onCancel,
+  onSave,
+}: {
+  user: UserRow;
+  onCancel: () => void;
+  onSave: (values: UpdateUserInput) => Promise<void>;
+}) {
+  const {
+    register,
+    handleSubmit,
+    setError,
+    formState: { errors, isSubmitting },
+  } = useForm<UpdateUserInput>({
+    resolver: zodResolver(updateUserSchema),
+    defaultValues: { name: user.name, email: user.email, role: user.role },
+    mode: "onChange",
+  });
+
+  // Not wrapped in a <form>: a <form> cannot contain a <tr>, and the cross-table
+  // `form=` attribute dance buys nothing here. handleSubmit works as a plain
+  // handler, called from the Save button and from Enter in any field.
+  const submit = handleSubmit(async (values) => {
+    try {
+      await onSave(values);
+    } catch (err) {
+      setError("root", {
+        message: apiErrorMessage(
+          err,
+          "Could not save the changes. Please try again.",
+        ),
+      });
+    }
+  });
+
+  // Enter saves, Escape cancels — what a keyboard user expects of a row that has
+  // turned into a form.
+  const onKeyDown = (event: ReactKeyboardEvent) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      void submit();
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      onCancel();
+    }
+  };
+
+  return (
+    <>
+      <tr className="border-b border-gray-100">
+        <td className={cellPadding(0)}>
+          {/* aria-label rather than a visible label: a table row has no room for
+              one, but the field still needs a name — and it has to say *which*
+              user's name, or it is indistinguishable from the create form's
+              "Name" field to anyone navigating by label. `user` is the row as
+              last fetched, so the label does not shift as the field is typed in. */}
+          <Input
+            aria-label={`Name for ${user.name}`}
+            autoFocus
+            aria-invalid={errors.name ? true : undefined}
+            onKeyDown={onKeyDown}
+            {...register("name")}
+          />
+        </td>
+        <td className={cellPadding(1)}>
+          <Input
+            aria-label={`Email for ${user.name}`}
+            type="email"
+            aria-invalid={errors.email ? true : undefined}
+            onKeyDown={onKeyDown}
+            {...register("email")}
+          />
+        </td>
+        <td className={cellPadding(2)}>
+          <select
+            aria-label={`Role for ${user.name}`}
+            className={ROW_SELECT_CLASS}
+            aria-invalid={errors.role ? true : undefined}
+            onKeyDown={onKeyDown}
+            {...register("role")}
+          >
+            {ROLES.map((role) => (
+              <option key={role} value={role}>
+                {role}
+              </option>
+            ))}
+          </select>
+        </td>
+        <td className={cellPadding(3)}>
+          {new Date(user.createdAt).toLocaleDateString()}
+        </td>
+        <td className={cellPadding(4)}>
+          <div className="flex items-center gap-1">
+            <Button
+              type="button"
+              size="icon-sm"
+              variant="ghost"
+              aria-label={`Save ${user.name}`}
+              disabled={isSubmitting}
+              onClick={() => void submit()}
+            >
+              <Check />
+            </Button>
+            <Button
+              type="button"
+              size="icon-sm"
+              variant="ghost"
+              aria-label={`Cancel editing ${user.name}`}
+              onClick={onCancel}
+            >
+              <X />
+            </Button>
+          </div>
+        </td>
+      </tr>
+      {/* Errors live in their own full-width row: the server's messages are long
+          enough to stretch a fixed-width cell out of shape. */}
+      {(errors.root || errors.name || errors.email || errors.role) && (
+        <tr className="border-b border-gray-100">
+          <td colSpan={COLUMNS.length} className="pb-2 text-sm text-red-600">
+            {errors.root?.message ??
+              errors.name?.message ??
+              errors.email?.message ??
+              errors.role?.message}
+          </td>
+        </tr>
+      )}
+    </>
+  );
+}
+
 export function UsersPage() {
-  const [createdMessage, setCreatedMessage] = useState<string | null>(null);
+  // Carries both outcomes now — a creation and a saved edit.
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  // Which row is open for editing; null means none. One at a time, so a
+  // half-finished edit cannot be forgotten behind another.
+  const [editingId, setEditingId] = useState<string | null>(null);
   const queryClient = useQueryClient();
 
   // The signal aborts the read if the page unmounts mid-load, so navigating
@@ -113,6 +286,24 @@ export function UsersPage() {
       queryClient.invalidateQueries({ queryKey: queryKeys.users.all }),
   });
 
+  const updateUserMutation = useMutation({
+    mutationFn: ({ id, values }: { id: string; values: UpdateUserInput }) =>
+      updateUser(id, values),
+    // Same invalidation as creation: the PATCH response omits createdAt, so the
+    // list is refetched rather than patched row by row.
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: queryKeys.users.all }),
+  });
+
+  // Throws on failure so the row editor can surface the server's message inline
+  // and stay open; the row closes only once the save lands.
+  async function saveUser(user: UserRow, values: UpdateUserInput) {
+    setStatusMessage(null);
+    await updateUserMutation.mutateAsync({ id: user.id, values });
+    setEditingId(null);
+    setStatusMessage(`Saved changes to ${values.email}.`);
+  }
+
   const {
     register,
     handleSubmit,
@@ -126,7 +317,7 @@ export function UsersPage() {
   });
 
   const onSubmit = handleSubmit(async (values) => {
-    setCreatedMessage(null);
+    setStatusMessage(null);
     try {
       await createUserMutation.mutateAsync(values);
     } catch (err) {
@@ -139,7 +330,7 @@ export function UsersPage() {
       return;
     }
 
-    setCreatedMessage(`Created ${values.role} account for ${values.email}.`);
+    setStatusMessage(`Created ${values.role} account for ${values.email}.`);
     reset();
   });
 
@@ -158,16 +349,41 @@ export function UsersPage() {
         {!isError && users && users.length > 0 && (
           <UsersTableFrame>
             <tbody>
-              {users.map((u) => (
-                <tr key={u.id} className="border-b border-gray-100">
-                  <td className={cellPadding(0)}>{u.name}</td>
-                  <td className={cellPadding(1)}>{u.email}</td>
-                  <td className={cellPadding(2)}>{u.role}</td>
-                  <td className={cellPadding(3)}>
-                    {new Date(u.createdAt).toLocaleDateString()}
-                  </td>
-                </tr>
-              ))}
+              {users.map((u) =>
+                editingId === u.id ? (
+                  <UserRowEditor
+                    key={u.id}
+                    user={u}
+                    onCancel={() => setEditingId(null)}
+                    onSave={(values) => saveUser(u, values)}
+                  />
+                ) : (
+                  <tr key={u.id} className="border-b border-gray-100">
+                    <td className={cellPadding(0)}>{u.name}</td>
+                    <td className={cellPadding(1)}>{u.email}</td>
+                    <td className={cellPadding(2)}>{u.role}</td>
+                    <td className={cellPadding(3)}>
+                      {new Date(u.createdAt).toLocaleDateString()}
+                    </td>
+                    <td className={cellPadding(4)}>
+                      {/* Per-row accessible name: "Edit" alone would give every
+                          row's button the same name. */}
+                      <Button
+                        type="button"
+                        size="icon-sm"
+                        variant="ghost"
+                        aria-label={`Edit ${u.name}`}
+                        onClick={() => {
+                          setStatusMessage(null);
+                          setEditingId(u.id);
+                        }}
+                      >
+                        <Pencil />
+                      </Button>
+                    </td>
+                  </tr>
+                ),
+              )}
             </tbody>
           </UsersTableFrame>
         )}
@@ -235,8 +451,8 @@ export function UsersPage() {
               </Field>
 
               {errors.root && <FieldError errors={[errors.root]} />}
-              {createdMessage && (
-                <p className="text-sm text-green-600">{createdMessage}</p>
+              {statusMessage && (
+                <p className="text-sm text-green-600">{statusMessage}</p>
               )}
 
               <Button type="submit" disabled={isSubmitting} className="w-full">

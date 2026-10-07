@@ -200,7 +200,12 @@ test.describe("UI: Users list (/users)", () => {
 
     const newRow = page.getByRole("row").filter({ hasText: email });
     await expect(newRow).toBeVisible();
-    await expect(newRow.getByRole("cell", { name: "Newly Listed User" })).toBeVisible();
+    // exact: true — the row-editing feature added an "Edit Newly Listed User"
+    // pencil button in the same row, whose cell would otherwise also match
+    // this name as a substring.
+    await expect(
+      newRow.getByRole("cell", { name: "Newly Listed User", exact: true }),
+    ).toBeVisible();
     await expect(newRow.getByRole("cell", { name: "agent", exact: true })).toBeVisible();
   });
 });

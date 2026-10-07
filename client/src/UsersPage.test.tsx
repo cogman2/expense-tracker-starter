@@ -12,11 +12,13 @@ import {
 import { UsersPage } from "./UsersPage";
 import type { CreateUserInput, UserRow } from "./lib/api";
 
-// Per-test responses for the two endpoints the page uses. The page runs against
-// the real lib/api module — only the network underneath it is faked — so these
-// specs cover getUsers/createUser/apiErrorMessage wiring as well as the markup.
+// Per-test responses for the endpoints the page uses. The page runs against the
+// real lib/api module — only the network underneath it is faked — so these specs
+// cover getUsers/createUser/updateUser/apiErrorMessage wiring as well as the
+// markup.
 let onGet: () => FakeResponse;
 let onPost: () => FakeResponse;
+let onPatch: () => FakeResponse;
 
 const rows: UserRow[] = [
   {
@@ -44,6 +46,7 @@ const validInput: CreateUserInput = {
 
 const postCalls = () => httpCalls().filter((c) => c.method === "post");
 const getCalls = () => httpCalls().filter((c) => c.method === "get");
+const patchCalls = () => httpCalls().filter((c) => c.method === "patch");
 
 // Skeletons are aria-hidden (components/ui/skeleton.tsx) so that they stay out
 // of the accessibility tree — which also puts them out of reach of the role and
@@ -55,6 +58,8 @@ const skeletons = (container: HTMLElement) =>
 // Fills the create-user form the way a person would: typing into each field and
 // picking the role, so react-hook-form's onChange validation runs for real.
 async function fillForm(user: UserEvent, input: CreateUserInput) {
+  // The create form's own visible labels — distinct from the row editor's
+  // per-row ones, which is the point of scoping those.
   await user.type(screen.getByLabelText("Name"), input.name);
   await user.type(screen.getByLabelText("Email"), input.email);
   await user.type(screen.getByLabelText("Password"), input.password);
@@ -75,7 +80,12 @@ async function findLoadedTable(): Promise<HTMLElement> {
 beforeEach(() => {
   onGet = () => ({ status: 200, data: { users: [] } });
   onPost = () => ({ status: 201, data: { user: { id: "new", ...validInput } } });
-  fakeHttp((config) => (config.method === "post" ? onPost() : onGet()));
+  onPatch = () => ({ status: 200, data: { user: rows[0] } });
+  fakeHttp((config) => {
+    if (config.method === "post") return onPost();
+    if (config.method === "patch") return onPatch();
+    return onGet();
+  });
 });
 
 afterEach(() => {
@@ -226,5 +236,190 @@ describe("create user form", () => {
     expect(
       await screen.findByText("Could not create the user. Please try again."),
     ).toBeInTheDocument();
+  });
+});
+
+describe("edit user row", () => {
+  // Every test here starts from a loaded, two-row table.
+  async function renderLoaded() {
+    onGet = () => ({ status: 200, data: { users: rows } });
+    const user = userEvent.setup();
+    renderWithQuery(<UsersPage />);
+    await findLoadedTable();
+    return user;
+  }
+
+  const openEditor = async (user: UserEvent, name: string) =>
+    user.click(screen.getByRole("button", { name: `Edit ${name}` }));
+
+  // The editor's fields are labelled per row ("Name for Ada Admin"), because a
+  // bare "Name" would collide with the create form's field below the table.
+  const field = (label: "Name" | "Email" | "Role", name = "Ada Admin") =>
+    screen.getByLabelText(`${label} for ${name}`);
+  const missingField = (label: "Name" | "Email" | "Role", name = "Ada Admin") =>
+    screen.queryByLabelText(`${label} for ${name}`);
+
+  test("each row offers an edit button named after its user", async () => {
+    await renderLoaded();
+
+    // Per-row names, so neither a screen reader nor a test has to count rows.
+    for (const row of rows) {
+      expect(
+        screen.getByRole("button", { name: `Edit ${row.name}` }),
+      ).toBeInTheDocument();
+    }
+  });
+
+  test("opening a row replaces its cells with fields holding the current values", async () => {
+    const user = await renderLoaded();
+
+    await openEditor(user, "Ada Admin");
+
+    expect(field("Name")).toHaveValue("Ada Admin");
+    expect(field("Email")).toHaveValue("ada@example.com");
+    expect(field("Role")).toHaveValue("admin");
+    // Only the one row opens: the other keeps its pencil and its text.
+    expect(
+      screen.getByRole("button", { name: "Edit Gene Agent" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("cell", { name: "gene@example.com" }),
+    ).toBeInTheDocument();
+    // No request yet — opening an editor is a local act.
+    expect(patchCalls()).toHaveLength(0);
+  });
+
+  test("saving PATCHes the row and refreshes the list", async () => {
+    const user = await renderLoaded();
+    await openEditor(user, "Ada Admin");
+
+    await user.clear(field("Name"));
+    await user.type(field("Name"), "Ada Lovelace");
+    await user.selectOptions(field("Role"), "agent");
+    await user.click(screen.getByRole("button", { name: "Save Ada Admin" }));
+
+    expect(patchCalls()).toHaveLength(1);
+    expect(patchCalls()[0]!.url).toBe("/api/users/u1");
+    expect(JSON.parse(patchCalls()[0]!.data as string)).toEqual({
+      name: "Ada Lovelace",
+      email: "ada@example.com",
+      role: "agent",
+    });
+    expect(
+      await screen.findByText("Saved changes to ada@example.com."),
+    ).toBeInTheDocument();
+    // The list reloads in place, as creation does — the PATCH response carries
+    // no createdAt, so the row cannot just be patched in.
+    expect(getCalls()).toHaveLength(2);
+    // Editor closed.
+    expect(missingField("Name")).not.toBeInTheDocument();
+  });
+
+  test("cancelling restores the row and sends nothing", async () => {
+    const user = await renderLoaded();
+    await openEditor(user, "Ada Admin");
+
+    await user.clear(field("Name"));
+    await user.type(field("Name"), "Discarded");
+    await user.click(
+      screen.getByRole("button", { name: "Cancel editing Ada Admin" }),
+    );
+
+    expect(patchCalls()).toHaveLength(0);
+    expect(missingField("Name")).not.toBeInTheDocument();
+    expect(
+      await screen.findByRole("cell", { name: "Ada Admin" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Discarded")).not.toBeInTheDocument();
+  });
+
+  test("reopening a row after a cancelled edit shows the stored values again", async () => {
+    const user = await renderLoaded();
+    await openEditor(user, "Ada Admin");
+    await user.clear(field("Name"));
+    await user.type(field("Name"), "Discarded");
+    await user.click(
+      screen.getByRole("button", { name: "Cancel editing Ada Admin" }),
+    );
+
+    await openEditor(user, "Ada Admin");
+
+    // The editor is keyed by row id, which is what resets its defaults.
+    expect(field("Name")).toHaveValue("Ada Admin");
+  });
+
+  test("opening a different row loads that row's values", async () => {
+    const user = await renderLoaded();
+    await openEditor(user, "Ada Admin");
+
+    await user.click(
+      screen.getByRole("button", { name: "Cancel editing Ada Admin" }),
+    );
+    await openEditor(user, "Gene Agent");
+
+    expect(field("Email", "Gene Agent")).toHaveValue("gene@example.com");
+    expect(field("Role", "Gene Agent")).toHaveValue("agent");
+  });
+
+  test("a rejected save surfaces the server's message and keeps the row open", async () => {
+    const message = "a user with that email already exists";
+    onPatch = () => ({ status: 409, data: { error: message } });
+    const user = await renderLoaded();
+    await openEditor(user, "Ada Admin");
+
+    await user.clear(field("Email"));
+    await user.type(field("Email"), "gene@example.com");
+    await user.click(screen.getByRole("button", { name: "Save Ada Admin" }));
+
+    // Goes through the real apiErrorMessage against a real AxiosError.
+    expect(await screen.findByText(message)).toBeInTheDocument();
+    // Still editing, so the admin can correct the value rather than retype it.
+    expect(field("Email")).toBeInTheDocument();
+    expect(screen.queryByText(/Saved changes/)).not.toBeInTheDocument();
+    // A failed save must not refresh the list.
+    expect(getCalls()).toHaveLength(1);
+  });
+
+  test("falls back to a generic message when the failure carries no error body", async () => {
+    onPatch = () => {
+      throw new AxiosError("Network Error", AxiosError.ERR_NETWORK);
+    };
+    const user = await renderLoaded();
+    await openEditor(user, "Ada Admin");
+
+    await user.click(screen.getByRole("button", { name: "Save Ada Admin" }));
+
+    expect(
+      await screen.findByText("Could not save the changes. Please try again."),
+    ).toBeInTheDocument();
+  });
+
+  test("invalid input is rejected client-side, before any request", async () => {
+    const user = await renderLoaded();
+    await openEditor(user, "Ada Admin");
+
+    await user.clear(field("Email"));
+    await user.type(field("Email"), "not-an-email");
+    await user.click(screen.getByRole("button", { name: "Save Ada Admin" }));
+
+    // The message is the shared schema's, worded for the API (core/src/users.ts).
+    expect(
+      await screen.findByText("a valid email is required"),
+    ).toBeInTheDocument();
+    expect(patchCalls()).toHaveLength(0);
+  });
+
+  test("Escape closes the editor and Enter saves it", async () => {
+    const user = await renderLoaded();
+    await openEditor(user, "Ada Admin");
+
+    await user.keyboard("{Escape}");
+    expect(missingField("Name")).not.toBeInTheDocument();
+    expect(patchCalls()).toHaveLength(0);
+
+    await openEditor(user, "Ada Admin");
+    await user.type(field("Name"), "{Enter}");
+
+    expect(patchCalls()).toHaveLength(1);
   });
 });

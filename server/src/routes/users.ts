@@ -8,7 +8,7 @@
 // router-level middleware: /api/me is auth-only, and keeping the guards at each
 // route is what makes that difference visible.
 import express from "express";
-import { createUserSchema } from "core";
+import { createUserSchema, updateUserSchema } from "core";
 import { auth } from "../auth";
 import { prisma } from "../db";
 import { requireAuth, requireAdmin } from "../require-auth";
@@ -76,6 +76,58 @@ usersRouter.post("/api/users", requireAuth, requireAdmin, async (req, res) => {
 
   // Return only safe fields — never the password hash or session data.
   res.status(201).json({
+    user: { id: user.id, name: user.name, email: user.email, role: user.role },
+  });
+});
+
+// Admin-only user edit: name, email and role. Passwords are not editable here —
+// changing someone's credentials is a separate operation. Like the create route,
+// the work goes through Better Auth's internal adapter rather than Prisma
+// directly, so anything Better Auth maintains alongside the row stays consistent.
+usersRouter.patch("/api/users/:id", requireAuth, requireAdmin, async (req, res) => {
+  // Same schema the client's row editor validates against (core/src/users.ts).
+  const parsed = updateUserSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: firstIssueMessage(parsed.error) });
+    return;
+  }
+  const { name, email, role } = parsed.data;
+
+  const ctx = await auth.$context;
+
+  const target = await ctx.internalAdapter.findUserById(req.params.id);
+  if (!target) {
+    res.status(404).json({ error: "user not found" });
+    return;
+  }
+
+  // An admin demoting themselves would lose access to this very page (and could
+  // strip the last admin), so it is refused rather than silently honored. Editing
+  // your own name or email is fine. The current role is read off the session
+  // rather than `target`: inside this branch they are the same row, and the
+  // session's user carries the role additionalField as a typed property.
+  const isSelf = target.id === req.auth!.user.id;
+  if (isSelf && role !== req.auth!.user.role) {
+    res.status(409).json({ error: "you cannot change your own role" });
+    return;
+  }
+
+  // Scoped to *other* rows: an email left untouched must not collide with itself.
+  const existing = await ctx.internalAdapter.findUserByEmail(email);
+  if (existing && existing.user.id !== target.id) {
+    res.status(409).json({ error: "a user with that email already exists" });
+    return;
+  }
+
+  const user = await ctx.internalAdapter.updateUser(target.id, {
+    name,
+    email,
+    role,
+  });
+
+  // Only safe fields, and no createdAt — the list endpoint remains the one place
+  // that reports it, exactly as with creation.
+  res.json({
     user: { id: user.id, name: user.name, email: user.email, role: user.role },
   });
 });

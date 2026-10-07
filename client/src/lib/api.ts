@@ -1,7 +1,7 @@
 // The client's HTTP layer. Every call to our own Express API goes through here
 // (Better Auth is the exception — it ships its own fetch layer, see auth-client).
 import axios from "axios";
-import type { CreateUserInput } from "core";
+import type { CreateUserInput, UpdateUserInput } from "core";
 
 // No baseURL: paths are written out in full so the Vite dev proxy rules apply as
 // written. The proxy treats them asymmetrically — `/api/users`, `/api/me` and
@@ -29,10 +29,10 @@ export interface UserRow {
   createdAt: string;
 }
 
-// The create-user payload is defined once, in the package both sides import
+// The user payloads are defined once, in the package both sides import
 // (core/src/users.ts), so this module cannot describe a body the server rejects.
-// Re-exported because callers (UsersPage, the specs) import it from here.
-export type { CreateUserInput };
+// Re-exported because callers (UsersPage, the specs) import them from here.
+export type { CreateUserInput, UpdateUserInput };
 
 // Each helper takes an optional AbortSignal. TanStack Query hands one to every
 // queryFn, so passing it through is what makes an in-flight read abort when the
@@ -54,6 +54,22 @@ export async function createUser(
 ): Promise<Omit<UserRow, "createdAt">> {
   const { data } = await api.post<{ user: Omit<UserRow, "createdAt"> }>(
     "/api/users",
+    input,
+    { signal },
+  );
+  return data.user;
+}
+
+// Edits name, email and role. Like create, the response omits createdAt — only
+// the list endpoint reports it — so callers refresh the list rather than patching
+// the returned row into place.
+export async function updateUser(
+  id: string,
+  input: UpdateUserInput,
+  signal?: AbortSignal,
+): Promise<Omit<UserRow, "createdAt">> {
+  const { data } = await api.patch<{ user: Omit<UserRow, "createdAt"> }>(
+    `/api/users/${id}`,
     input,
     { signal },
   );

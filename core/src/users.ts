@@ -49,3 +49,17 @@ export const createUserSchema = z.object({
 
 /** The parsed payload: trimmed name, lowercased email, narrowed role. */
 export type CreateUserInput = z.infer<typeof createUserSchema>;
+
+/**
+ * The PATCH /api/users/:id payload: the same name/email/role rules as creation,
+ * minus the password. Derived with .omit() rather than written out again so the
+ * trim, the lowercase-then-email pipe, the role enum, the message wording and the
+ * field order all stay defined once.
+ *
+ * Passwords are deliberately not editable here — changing someone's credentials
+ * is a different operation with different risk.
+ */
+export const updateUserSchema = createUserSchema.omit({ password: true });
+
+/** The parsed update payload: trimmed name, lowercased email, narrowed role. */
+export type UpdateUserInput = z.infer<typeof updateUserSchema>;
