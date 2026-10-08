@@ -63,6 +63,9 @@ const COLUMNS = [
   { label: "Actions", width: "w-[10%]", bar: "w-8", srOnlyLabel: true },
 ] as const;
 
+// Shared so a row cannot render its date one way and its editor another.
+const formatCreated = (iso: string) => new Date(iso).toLocaleDateString();
+
 // break-words matters under `table-fixed`: the columns are percentages, so at
 // phone widths an address like a.very.long.name@example.com is wider than its
 // cell, and with nothing to break on it would otherwise spill across the columns
@@ -121,10 +124,23 @@ function UsersTableSkeleton() {
   );
 }
 
-// The row editor's role picker, styled like the create form's select but sized
-// for a fixed-width table cell (full width, tighter padding).
-const ROW_SELECT_CLASS =
-  "h-9 w-full rounded-md border border-input bg-transparent px-2 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50";
+// Shared by both role pickers; each adds its own width and padding.
+const SELECT_CLASS =
+  "h-9 rounded-md border border-input bg-transparent text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50";
+
+// Both pickers derive their options from ROLES (core/src/users.ts), so neither
+// can offer a role the server's schema would reject.
+function RoleOptions() {
+  return (
+    <>
+      {ROLES.map((role) => (
+        <option key={role} value={role}>
+          {role[0]!.toUpperCase() + role.slice(1)}
+        </option>
+      ))}
+    </>
+  );
+}
 
 // One row in edit mode. It owns its own useForm against the shared update schema
 // (the same wiring as the create form, per CLAUDE.md), so opening a row never
@@ -178,6 +194,11 @@ function UserRowEditor({
   // (A failed client-side validation needs no equivalent: react-hook-form focuses
   // the offending field itself.)
   const serverError = errors.root?.message;
+  const errorMessage =
+    serverError ??
+    errors.name?.message ??
+    errors.email?.message ??
+    errors.role?.message;
   useEffect(() => {
     if (serverError) saveRef.current?.focus();
   }, [serverError]);
@@ -230,20 +251,16 @@ function UserRowEditor({
         <td className={cellPadding(2)}>
           <select
             aria-label={`Role for ${user.name}`}
-            className={ROW_SELECT_CLASS}
+            className={`${SELECT_CLASS} w-full px-2`}
             aria-invalid={errors.role ? true : undefined}
             onKeyDown={onFieldKeyDown}
             {...register("role")}
           >
-            {ROLES.map((role) => (
-              <option key={role} value={role}>
-                {role}
-              </option>
-            ))}
+            <RoleOptions />
           </select>
         </td>
         <td className={cellPadding(3)}>
-          {new Date(user.createdAt).toLocaleDateString()}
+          {formatCreated(user.createdAt)}
         </td>
         <td className={cellPadding(4)}>
           <div className="flex items-center gap-1">
@@ -271,8 +288,9 @@ function UserRowEditor({
         </td>
       </tr>
       {/* Errors live in their own full-width row: the server's messages are long
-          enough to stretch a fixed-width cell out of shape. */}
-      {(errors.root || errors.name || errors.email || errors.role) && (
+          enough to stretch a fixed-width cell out of shape. A server rejection
+          outranks a field error — it is the newer news. */}
+      {errorMessage && (
         <tr className="border-b border-gray-100">
           {/* role="alert" so the failure is announced when it appears, rather
               than only being noticed by someone who can see the row. */}
@@ -281,10 +299,7 @@ function UserRowEditor({
             colSpan={COLUMNS.length}
             className="pb-2 text-sm text-red-600"
           >
-            {errors.root?.message ??
-              errors.name?.message ??
-              errors.email?.message ??
-              errors.role?.message}
+            {errorMessage}
           </td>
         </tr>
       )}
@@ -293,8 +308,11 @@ function UserRowEditor({
 }
 
 export function UsersPage() {
-  // Carries both outcomes now — a creation and a saved edit.
-  const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  // Two separate confirmations rather than one shared slot: each belongs beside
+  // the thing that produced it. A save's message shown inside the create-user
+  // card would sit at the bottom of the page, far from the row just edited.
+  const [createdMessage, setCreatedMessage] = useState<string | null>(null);
+  const [savedMessage, setSavedMessage] = useState<string | null>(null);
   // Which row is open for editing; null means none. One at a time, so a
   // half-finished edit cannot be forgotten behind another.
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -331,10 +349,10 @@ export function UsersPage() {
   // Throws on failure so the row editor can surface the server's message inline
   // and stay open; the row closes only once the save lands.
   async function saveUser(user: UserRow, values: UpdateUserInput) {
-    setStatusMessage(null);
+    setSavedMessage(null);
     await updateUserMutation.mutateAsync({ id: user.id, values });
     setEditingId(null);
-    setStatusMessage(`Saved changes to ${values.email}.`);
+    setSavedMessage(`Saved changes to ${values.email}.`);
   }
 
   const {
@@ -350,7 +368,7 @@ export function UsersPage() {
   });
 
   const onSubmit = handleSubmit(async (values) => {
-    setStatusMessage(null);
+    setCreatedMessage(null);
     try {
       await createUserMutation.mutateAsync(values);
     } catch (err) {
@@ -363,7 +381,7 @@ export function UsersPage() {
       return;
     }
 
-    setStatusMessage(`Created ${values.role} account for ${values.email}.`);
+    setCreatedMessage(`Created ${values.role} account for ${values.email}.`);
     reset();
   });
 
@@ -378,6 +396,9 @@ export function UsersPage() {
         {!isError && isPending && <UsersTableSkeleton />}
         {!isError && users && users.length === 0 && (
           <p className="text-sm text-gray-500">No users yet.</p>
+        )}
+        {savedMessage && (
+          <p className="mb-2 text-sm text-green-600">{savedMessage}</p>
         )}
         {!isError && users && users.length > 0 && (
           <UsersTableFrame>
@@ -396,7 +417,7 @@ export function UsersPage() {
                     <td className={cellPadding(1)}>{u.email}</td>
                     <td className={cellPadding(2)}>{u.role}</td>
                     <td className={cellPadding(3)}>
-                      {new Date(u.createdAt).toLocaleDateString()}
+                      {formatCreated(u.createdAt)}
                     </td>
                     <td className={cellPadding(4)}>
                       {/* Per-row accessible name: "Edit" alone would give every
@@ -407,7 +428,7 @@ export function UsersPage() {
                         variant="ghost"
                         aria-label={`Edit ${u.name}`}
                         onClick={() => {
-                          setStatusMessage(null);
+                          setSavedMessage(null);
                           setEditingId(u.id);
                         }}
                       >
@@ -473,19 +494,18 @@ export function UsersPage() {
                 <FieldLabel htmlFor="role">Role</FieldLabel>
                 <select
                   id="role"
-                  className="h-9 rounded-md border border-input bg-transparent px-3 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+                  className={`${SELECT_CLASS} px-3`}
                   aria-invalid={errors.role ? true : undefined}
                   {...register("role")}
                 >
-                  <option value="agent">Agent</option>
-                  <option value="admin">Admin</option>
+                  <RoleOptions />
                 </select>
                 <FieldError errors={errors.role ? [errors.role] : undefined} />
               </Field>
 
               {errors.root && <FieldError errors={[errors.root]} />}
-              {statusMessage && (
-                <p className="text-sm text-green-600">{statusMessage}</p>
+              {createdMessage && (
+                <p className="text-sm text-green-600">{createdMessage}</p>
               )}
 
               <Button type="submit" disabled={isSubmitting} className="w-full">
