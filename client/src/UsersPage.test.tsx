@@ -409,6 +409,21 @@ describe("edit user row", () => {
     expect(patchCalls()).toHaveLength(0);
   });
 
+  test("Escape still cancels when focus is on a button, not a field", async () => {
+    // Found by driving the app: after a rejected save, focus sits on Save — the
+    // moment a keyboard user is most likely to back out — so Escape cannot be
+    // bound to the fields alone.
+    onPatch = () => ({ status: 409, data: { error: "nope" } });
+    const user = await renderLoaded();
+    await openEditor(user, "Ada Admin");
+    await user.click(screen.getByRole("button", { name: "Save Ada Admin" }));
+    await screen.findByText("nope");
+
+    await user.keyboard("{Escape}");
+
+    expect(missingField("Name")).not.toBeInTheDocument();
+  });
+
   test("Escape closes the editor and Enter saves it", async () => {
     const user = await renderLoaded();
     await openEditor(user, "Ada Admin");

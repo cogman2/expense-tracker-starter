@@ -1,4 +1,6 @@
 import {
+  useEffect,
+  useRef,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
@@ -61,8 +63,12 @@ const COLUMNS = [
   { label: "Actions", width: "w-[10%]", bar: "w-8", srOnlyLabel: true },
 ] as const;
 
+// break-words matters under `table-fixed`: the columns are percentages, so at
+// phone widths an address like a.very.long.name@example.com is wider than its
+// cell, and with nothing to break on it would otherwise spill across the columns
+// beside it.
 const cellPadding = (index: number) =>
-  index === COLUMNS.length - 1 ? "py-2" : "py-2 pr-4";
+  index === COLUMNS.length - 1 ? "py-2 break-words" : "py-2 pr-4 break-words";
 
 // The wrapper, column widths and header row, shared so the loading and loaded
 // tables cannot drift apart. Callers supply only the <tbody>.
@@ -146,6 +152,8 @@ function UserRowEditor({
     mode: "onChange",
   });
 
+  const saveRef = useRef<HTMLButtonElement>(null);
+
   // Not wrapped in a <form>: a <form> cannot contain a <tr>, and the cross-table
   // `form=` attribute dance buys nothing here. handleSubmit works as a plain
   // handler, called from the Save button and from Enter in any field.
@@ -162,13 +170,31 @@ function UserRowEditor({
     }
   });
 
-  // Enter saves, Escape cancels — what a keyboard user expects of a row that has
-  // turned into a form.
-  const onKeyDown = (event: ReactKeyboardEvent) => {
+  // Clicking a button does not focus it on macOS, so a rejected save leaves focus
+  // on <body> — outside the row, where Escape and Enter reach nothing and a
+  // keyboard user has lost their place entirely. Put it back on Save: adjacent to
+  // the message and still inside the row. This has to run after the render that
+  // clears isSubmitting, because focusing a disabled button does nothing.
+  // (A failed client-side validation needs no equivalent: react-hook-form focuses
+  // the offending field itself.)
+  const serverError = errors.root?.message;
+  useEffect(() => {
+    if (serverError) saveRef.current?.focus();
+  }, [serverError]);
+
+  // Enter saves, but only from a field: on the Save or Cancel button the browser
+  // already activates the focused button, which is what a keyboard user expects.
+  const onFieldKeyDown = (event: ReactKeyboardEvent) => {
     if (event.key === "Enter") {
       event.preventDefault();
       void submit();
     }
+  };
+
+  // Escape is handled on the row rather than per field so it works wherever focus
+  // happens to be — including the Save button, where focus lands after a rejected
+  // save, which is exactly when backing out is most likely.
+  const onRowKeyDown = (event: ReactKeyboardEvent) => {
     if (event.key === "Escape") {
       event.preventDefault();
       onCancel();
@@ -177,7 +203,7 @@ function UserRowEditor({
 
   return (
     <>
-      <tr className="border-b border-gray-100">
+      <tr className="border-b border-gray-100" onKeyDown={onRowKeyDown}>
         <td className={cellPadding(0)}>
           {/* aria-label rather than a visible label: a table row has no room for
               one, but the field still needs a name — and it has to say *which*
@@ -188,7 +214,7 @@ function UserRowEditor({
             aria-label={`Name for ${user.name}`}
             autoFocus
             aria-invalid={errors.name ? true : undefined}
-            onKeyDown={onKeyDown}
+            onKeyDown={onFieldKeyDown}
             {...register("name")}
           />
         </td>
@@ -197,7 +223,7 @@ function UserRowEditor({
             aria-label={`Email for ${user.name}`}
             type="email"
             aria-invalid={errors.email ? true : undefined}
-            onKeyDown={onKeyDown}
+            onKeyDown={onFieldKeyDown}
             {...register("email")}
           />
         </td>
@@ -206,7 +232,7 @@ function UserRowEditor({
             aria-label={`Role for ${user.name}`}
             className={ROW_SELECT_CLASS}
             aria-invalid={errors.role ? true : undefined}
-            onKeyDown={onKeyDown}
+            onKeyDown={onFieldKeyDown}
             {...register("role")}
           >
             {ROLES.map((role) => (
@@ -222,6 +248,7 @@ function UserRowEditor({
         <td className={cellPadding(4)}>
           <div className="flex items-center gap-1">
             <Button
+              ref={saveRef}
               type="button"
               size="icon-sm"
               variant="ghost"
@@ -247,7 +274,13 @@ function UserRowEditor({
           enough to stretch a fixed-width cell out of shape. */}
       {(errors.root || errors.name || errors.email || errors.role) && (
         <tr className="border-b border-gray-100">
-          <td colSpan={COLUMNS.length} className="pb-2 text-sm text-red-600">
+          {/* role="alert" so the failure is announced when it appears, rather
+              than only being noticed by someone who can see the row. */}
+          <td
+            role="alert"
+            colSpan={COLUMNS.length}
+            className="pb-2 text-sm text-red-600"
+          >
             {errors.root?.message ??
               errors.name?.message ??
               errors.email?.message ??
