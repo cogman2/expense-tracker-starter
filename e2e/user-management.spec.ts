@@ -1,8 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-// Not `from "core"`: the bare workspace specifier is only symlinked into
-// client/node_modules, so neither tsc nor Playwright's loader resolves it from
-// e2e/. The relative path reaches the same single source of truth.
-import { Role, type UserRole } from "../core/src/users";
+import { Role, type UserRole } from "core";
 import { ADMIN, AGENT, login, loginAndWaitForHome } from "./auth-helpers";
 
 // Happy-path, UI-only coverage of the user CRUD operations on /users.
