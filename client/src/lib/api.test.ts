@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import axios, { AxiosError } from "axios";
+import { Role } from "core";
 import {
   fakeHttp,
   httpCalls,
@@ -20,7 +21,7 @@ const userRow: UserRow = {
   id: "u1",
   name: "Ada",
   email: "ada@example.com",
-  role: "admin",
+  role: Role.admin,
   createdAt: "2024-01-01T00:00:00.000Z",
 };
 
@@ -58,7 +59,7 @@ describe("request shape", () => {
       name: "Ada",
       email: "ada@example.com",
       password: "password123",
-      role: "admin" as const,
+      role: Role.admin,
     };
 
     await createUser(input);
@@ -97,7 +98,7 @@ describe("response unwrapping", () => {
       id: "u2",
       name: "Grace",
       email: "grace@example.com",
-      role: "agent" as const,
+      role: Role.agent,
     };
     respondWith(201, { user: created });
 
@@ -123,7 +124,7 @@ describe("non-2xx responses reject", () => {
         name: "Ada",
         email: "ada@example.com",
         password: "password123",
-        role: "agent",
+        role: Role.agent,
       }),
     ).rejects.toThrow();
   });
@@ -142,7 +143,7 @@ describe("cancellation", () => {
   });
 
   test("createUser accepts a signal too", async () => {
-    respondWith(201, { user: { id: "u", name: "", email: "", role: "agent" } });
+    respondWith(201, { user: { id: "u", name: "", email: "", role: Role.agent } });
     const controller = new AbortController();
 
     await createUser(
@@ -150,7 +151,7 @@ describe("cancellation", () => {
         name: "Ada",
         email: "ada@example.com",
         password: "password123",
-        role: "agent",
+        role: Role.agent,
       },
       controller.signal,
     );

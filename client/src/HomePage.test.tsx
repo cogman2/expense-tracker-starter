@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, mock, test } from "bun:test";
 import { MemoryRouter } from "react-router";
+import { Role } from "core";
 import {
   authClientMock,
   renderComponent,
@@ -27,7 +28,7 @@ afterEach(async () => {
 
 describe("HomePage server status", () => {
   test("renders the health payload when the request succeeds", async () => {
-    setSession({ user: { role: "admin", name: "Admin" } });
+    setSession({ user: { role: Role.admin, name: "Admin" } });
     respondWith(200, {
       status: "ok",
       service: "helpdesk-server",
@@ -46,7 +47,7 @@ describe("HomePage server status", () => {
   test("renders an error instead of health data when the request fails", async () => {
     // The migration's behaviour change: under fetch this 500's JSON body was
     // rendered as if the server were healthy, because nothing checked res.ok.
-    setSession({ user: { role: "admin", name: "Admin" } });
+    setSession({ user: { role: Role.admin, name: "Admin" } });
     respondWith(500, { status: "ok", service: "lying", timestamp: "" });
 
     const text = (await render()).textContent ?? "";

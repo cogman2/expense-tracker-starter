@@ -55,6 +55,24 @@ duplication is what the package exists to prevent. In practice:
   wording and `core/src/users.test.ts` pins the parsing rules, so changing a
   message means updating both.
 
+## Roles
+
+Never write a role as a string literal (`"admin"`, `"agent"`) — in source or in
+tests. Use what `core/src/users.ts` exports:
+
+- **`Role.admin` / `Role.agent`** — when code means one particular role
+  (comparisons, defaults, test fixtures).
+- **`ROLES`** — when it needs every role: the zod enum, the role pickers, Better
+  Auth's `additionalFields` type (`[...ROLES]`).
+- **`UserRole`** — the type, never a hand-written `"admin" | "agent"` union.
+- **Role-based rules** go in `core` as functions both sides call, e.g.
+  `canDeleteUser` — the server enforces it, the client only hides the control.
+
+Adding a role means adding it to `ROLES` and `Role` (the `satisfies` clause fails
+the build until both agree) and to Prisma's `Role` enum (`RolesMatchPrisma`).
+Known leftovers to convert when next touched: `server/src/require-auth.ts` and
+`server/src/auth.ts`.
+
 ## Testing
 
 The repo has three kinds of tests:

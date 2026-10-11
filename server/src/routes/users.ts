@@ -8,7 +8,7 @@
 // router-level middleware: /api/me is auth-only, and keeping the guards at each
 // route is what makes that difference visible.
 import express from "express";
-import { createUserSchema, updateUserSchema } from "core";
+import { canDeleteUser, createUserSchema, updateUserSchema } from "core";
 import { auth } from "../auth";
 import { prisma } from "../db";
 import { requireAuth, requireAdmin } from "../require-auth";
@@ -24,11 +24,21 @@ usersRouter.get("/api/me", requireAuth, (req, res) => {
   res.json({ user: req.auth!.user });
 });
 
+// Whether a user has been soft-deleted (see the DELETE route below).
+async function isDeleted(id: string): Promise<boolean> {
+  const row = await prisma.user.findUnique({
+    where: { id },
+    select: { deletedAt: true },
+  });
+  return row?.deletedAt != null;
+}
+
 // Admin-only user list. Explicit `select` (never raw rows) keeps the response
 // to safe fields — no password hash (which lives on Account, not User) or
-// session data can leak.
+// session data can leak. Soft-deleted users are left out.
 usersRouter.get("/api/users", requireAuth, requireAdmin, async (_req, res) => {
   const users = await prisma.user.findMany({
+    where: { deletedAt: null },
     select: { id: true, name: true, email: true, role: true, createdAt: true },
     orderBy: { createdAt: "asc" },
   });
@@ -95,8 +105,10 @@ usersRouter.patch("/api/users/:id", requireAuth, requireAdmin, async (req, res) 
 
   const ctx = await auth.$context;
 
+  // A soft-deleted user is gone as far as the API is concerned. The adapter's
+  // User type does not carry deletedAt, so that one column is read via Prisma.
   const target = await ctx.internalAdapter.findUserById(req.params.id);
-  if (!target) {
+  if (!target || (await isDeleted(target.id))) {
     res.status(404).json({ error: "user not found" });
     return;
   }
@@ -130,4 +142,34 @@ usersRouter.patch("/api/users/:id", requireAuth, requireAdmin, async (req, res) 
   res.json({
     user: { id: user.id, name: user.name, email: user.email, role: user.role },
   });
+});
+
+// Admin-only soft delete. The row is kept with deletedAt set — its email stays
+// taken, so the create route's duplicate check still refuses it — and every
+// session it holds is revoked, so the user is signed out at once; the session
+// hook in ../auth.ts keeps them from signing back in. Admin accounts cannot be
+// deleted at all, which also rules out deleting yourself.
+usersRouter.delete("/api/users/:id", requireAuth, requireAdmin, async (req, res) => {
+  const target = await prisma.user.findUnique({
+    where: { id: req.params.id },
+    select: { id: true, role: true, deletedAt: true },
+  });
+  if (!target || target.deletedAt) {
+    res.status(404).json({ error: "user not found" });
+    return;
+  }
+
+  if (!canDeleteUser(target)) {
+    res.status(409).json({ error: "admin users cannot be deleted" });
+    return;
+  }
+
+  await prisma.user.update({
+    where: { id: target.id },
+    data: { deletedAt: new Date() },
+  });
+  const ctx = await auth.$context;
+  await ctx.internalAdapter.deleteUserSessions(target.id);
+
+  res.status(204).end();
 });

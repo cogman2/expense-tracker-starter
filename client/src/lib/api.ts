@@ -1,7 +1,7 @@
 // The client's HTTP layer. Every call to our own Express API goes through here
 // (Better Auth is the exception — it ships its own fetch layer, see auth-client).
 import axios from "axios";
-import type { CreateUserInput, UpdateUserInput } from "core";
+import type { CreateUserInput, UpdateUserInput, UserRole } from "core";
 
 // No baseURL: paths are written out in full so the Vite dev proxy rules apply as
 // written. The proxy treats them asymmetrically — `/api/users`, `/api/me` and
@@ -25,7 +25,7 @@ export interface UserRow {
   id: string;
   name: string;
   email: string;
-  role: "admin" | "agent";
+  role: UserRole;
   createdAt: string;
 }
 
@@ -74,6 +74,12 @@ export async function updateUser(
     { signal },
   );
   return data.user;
+}
+
+// Soft-deletes a user. The server answers 204 with no body; admins cannot be
+// deleted (409).
+export async function deleteUser(id: string, signal?: AbortSignal): Promise<void> {
+  await api.delete(`/api/users/${id}`, { signal });
 }
 
 // Surfaces the server's `{ error }` message from a failed response, falling back

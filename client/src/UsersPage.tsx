@@ -10,13 +10,24 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { zodResolver } from "@hookform/resolvers/zod";
 // Shared with the server, which validates the same payload (core/src/users.ts).
 import {
+  canDeleteUser,
   createUserSchema,
+  Role,
   updateUserSchema,
   ROLES,
   type CreateUserInput,
   type UpdateUserInput,
 } from "core";
-import { Check, Pencil, X } from "lucide-react";
+import { Check, Pencil, Trash2, X } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogClose,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -36,6 +47,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import {
   apiErrorMessage,
   createUser,
+  deleteUser,
   getUsers,
   updateUser,
   type UserRow,
@@ -57,10 +69,10 @@ const SKELETON_ROWS = 3;
 // noise, but a blank <th> leaves the column unnamed.
 const COLUMNS = [
   { label: "Name", width: "w-[28%]", bar: "w-28" },
-  { label: "Email", width: "w-[34%]", bar: "w-40" },
-  { label: "Role", width: "w-[14%]", bar: "w-16" },
+  { label: "Email", width: "w-[32%]", bar: "w-40" },
+  { label: "Role", width: "w-[12%]", bar: "w-16" },
   { label: "Created", width: "w-[14%]", bar: "w-20" },
-  { label: "Actions", width: "w-[10%]", bar: "w-8", srOnlyLabel: true },
+  { label: "Actions", width: "w-[14%]", bar: "w-12", srOnlyLabel: true },
 ] as const;
 
 // Shared so a row cannot render its date one way and its editor another.
@@ -307,6 +319,87 @@ function UserRowEditor({
   );
 }
 
+// Confirmation before a soft delete. Controlled by the page: `user` is the row
+// being confirmed, kept after `open` goes false so the text does not blank out
+// while the close animation plays. A failed delete keeps the dialog open with
+// the server's message; it closes only once the delete lands.
+function DeleteUserDialog({
+  user,
+  open,
+  onOpenChange,
+  onConfirm,
+}: {
+  user: UserRow | null;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onConfirm: (user: UserRow) => Promise<void>;
+}) {
+  const [error, setError] = useState<string | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  // A fresh dialog starts without the last attempt's error.
+  useEffect(() => {
+    if (open) setError(null);
+  }, [open]);
+
+  async function confirm() {
+    if (!user) return;
+    setError(null);
+    setIsDeleting(true);
+    try {
+      await onConfirm(user);
+    } catch (err) {
+      setError(
+        apiErrorMessage(err, "Could not delete the user. Please try again."),
+      );
+    } finally {
+      setIsDeleting(false);
+    }
+  }
+
+  return (
+    <AlertDialog
+      open={open}
+      // Escape and Cancel are ignored mid-request, so the dialog cannot vanish
+      // while the outcome is still unknown.
+      onOpenChange={(next) => {
+        if (!isDeleting) onOpenChange(next);
+      }}
+    >
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Delete user?</AlertDialogTitle>
+          <AlertDialogDescription>
+            {user?.name} ({user?.email}) will be signed out and will no longer
+            be able to sign in.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        {error && (
+          <p role="alert" className="text-sm text-red-600">
+            {error}
+          </p>
+        )}
+        <AlertDialogFooter>
+          <AlertDialogClose
+            disabled={isDeleting}
+            render={<Button type="button" variant="outline" />}
+          >
+            Cancel
+          </AlertDialogClose>
+          <Button
+            type="button"
+            variant="destructive"
+            disabled={isDeleting}
+            onClick={() => void confirm()}
+          >
+            {isDeleting ? "Deleting…" : "Delete"}
+          </Button>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+}
+
 export function UsersPage() {
   // Two separate confirmations rather than one shared slot: each belongs beside
   // the thing that produced it. A save's message shown inside the create-user
@@ -316,6 +409,10 @@ export function UsersPage() {
   // Which row is open for editing; null means none. One at a time, so a
   // half-finished edit cannot be forgotten behind another.
   const [editingId, setEditingId] = useState<string | null>(null);
+  // The row awaiting delete confirmation. Kept separate from the open flag so
+  // the dialog's text survives its close animation.
+  const [deletingUser, setDeletingUser] = useState<UserRow | null>(null);
+  const [deleteOpen, setDeleteOpen] = useState(false);
   const queryClient = useQueryClient();
 
   // The signal aborts the read if the page unmounts mid-load, so navigating
@@ -346,6 +443,19 @@ export function UsersPage() {
       queryClient.invalidateQueries({ queryKey: queryKeys.users.all }),
   });
 
+  const deleteUserMutation = useMutation({
+    mutationFn: (id: string) => deleteUser(id),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: queryKeys.users.all }),
+  });
+
+  // Throws on failure so the dialog can show the server's message and stay open.
+  async function confirmDelete(user: UserRow) {
+    await deleteUserMutation.mutateAsync(user.id);
+    setDeleteOpen(false);
+    setSavedMessage(`Deleted ${user.email}.`);
+  }
+
   // Throws on failure so the row editor can surface the server's message inline
   // and stay open; the row closes only once the save lands.
   async function saveUser(user: UserRow, values: UpdateUserInput) {
@@ -363,7 +473,7 @@ export function UsersPage() {
     formState: { errors, isSubmitting },
   } = useForm<CreateUserInput>({
     resolver: zodResolver(createUserSchema),
-    defaultValues: { name: "", email: "", password: "", role: "agent" },
+    defaultValues: { name: "", email: "", password: "", role: Role.agent },
     mode: "onChange",
   });
 
@@ -420,20 +530,39 @@ export function UsersPage() {
                       {formatCreated(u.createdAt)}
                     </td>
                     <td className={cellPadding(4)}>
-                      {/* Per-row accessible name: "Edit" alone would give every
-                          row's button the same name. */}
-                      <Button
-                        type="button"
-                        size="icon-sm"
-                        variant="ghost"
-                        aria-label={`Edit ${u.name}`}
-                        onClick={() => {
-                          setSavedMessage(null);
-                          setEditingId(u.id);
-                        }}
-                      >
-                        <Pencil />
-                      </Button>
+                      <div className="flex items-center gap-1">
+                        {/* Per-row accessible names: "Edit" alone would give
+                            every row's button the same name. */}
+                        <Button
+                          type="button"
+                          size="icon-sm"
+                          variant="ghost"
+                          aria-label={`Edit ${u.name}`}
+                          onClick={() => {
+                            setSavedMessage(null);
+                            setEditingId(u.id);
+                          }}
+                        >
+                          <Pencil />
+                        </Button>
+                        {/* Same rule the server enforces (core/src/users.ts);
+                            this just keeps the dead end off screen. */}
+                        {canDeleteUser(u) && (
+                          <Button
+                            type="button"
+                            size="icon-sm"
+                            variant="ghost"
+                            aria-label={`Delete ${u.name}`}
+                            onClick={() => {
+                              setSavedMessage(null);
+                              setDeletingUser(u);
+                              setDeleteOpen(true);
+                            }}
+                          >
+                            <Trash2 />
+                          </Button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ),
@@ -441,6 +570,12 @@ export function UsersPage() {
             </tbody>
           </UsersTableFrame>
         )}
+        <DeleteUserDialog
+          user={deletingUser}
+          open={deleteOpen}
+          onOpenChange={setDeleteOpen}
+          onConfirm={confirmDelete}
+        />
       </section>
 
       <Card className="mt-6 w-full max-w-sm">

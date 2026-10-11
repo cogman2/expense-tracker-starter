@@ -1,4 +1,5 @@
 import { Navigate, Outlet } from "react-router";
+import { Role } from "core";
 import { useSession } from "./auth-client";
 import { PageSkeleton } from "@/components/PageSkeleton";
 
@@ -15,7 +16,7 @@ export function RequireAdmin() {
     return <Navigate to="/login" replace />;
   }
 
-  if (session.user.role !== "admin") {
+  if (session.user.role !== Role.admin) {
     return <Navigate to="/" replace />;
   }
 

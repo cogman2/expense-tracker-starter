@@ -1,3 +1,5 @@
+import type { UserRole } from "core";
+
 // Central query-key factory. Keys are hierarchical so a broad invalidation
 // covers every narrower variant beneath it: invalidating `users.all` also
 // refreshes every filtered or paginated list built by `users.list`.
@@ -7,7 +9,7 @@
 
 /** Filters for the users list. Empty today; widen as the list grows. */
 export interface UserFilters {
-  role?: "admin" | "agent";
+  role?: UserRole;
   search?: string;
 }
 

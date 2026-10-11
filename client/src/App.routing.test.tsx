@@ -3,6 +3,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter } from "react-router";
 import { QueryClientProvider } from "@tanstack/react-query";
+import { Role } from "core";
 import {
   authClientMock,
   createTestQueryClient,
@@ -70,13 +71,13 @@ afterEach(async () => {
 
 describe("/users routing", () => {
   test("renders the Users page for an admin", async () => {
-    setSession({ user: { role: "admin", name: "Admin" } });
+    setSession({ user: { role: Role.admin, name: "Admin" } });
     const text = await renderAt("/users");
     expect(text).toContain("Users");
   });
 
   test("redirects an agent (non-admin) to the homepage", async () => {
-    setSession({ user: { role: "agent", name: "Agent" } });
+    setSession({ user: { role: Role.agent, name: "Agent" } });
     const text = await renderAt("/users");
     // HomePage renders the "Helpdesk" heading; the Users page heading is absent.
     expect(text).toContain("Helpdesk");

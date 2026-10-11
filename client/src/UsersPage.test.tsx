@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { cleanup, screen, within } from "@testing-library/react";
+import { cleanup, screen, waitFor, within } from "@testing-library/react";
 import userEvent, { type UserEvent } from "@testing-library/user-event";
 import { AxiosError } from "axios";
+import { Role } from "core";
 import { renderWithQuery } from "./testRender";
 import {
   fakeHttp,
@@ -19,20 +20,21 @@ import type { CreateUserInput, UserRow } from "./lib/api";
 let onGet: () => FakeResponse;
 let onPost: () => FakeResponse;
 let onPatch: () => FakeResponse;
+let onDelete: () => FakeResponse;
 
 const rows: UserRow[] = [
   {
     id: "u1",
     name: "Ada Admin",
     email: "ada@example.com",
-    role: "admin",
+    role: Role.admin,
     createdAt: "2024-01-01T00:00:00.000Z",
   },
   {
     id: "u2",
     name: "Gene Agent",
     email: "gene@example.com",
-    role: "agent",
+    role: Role.agent,
     createdAt: "2024-02-02T00:00:00.000Z",
   },
 ];
@@ -41,12 +43,13 @@ const validInput: CreateUserInput = {
   name: "New Person",
   email: "new@example.com",
   password: "password123",
-  role: "agent",
+  role: Role.agent,
 };
 
 const postCalls = () => httpCalls().filter((c) => c.method === "post");
 const getCalls = () => httpCalls().filter((c) => c.method === "get");
 const patchCalls = () => httpCalls().filter((c) => c.method === "patch");
+const deleteCalls = () => httpCalls().filter((c) => c.method === "delete");
 
 // Skeletons are aria-hidden (components/ui/skeleton.tsx) so that they stay out
 // of the accessibility tree — which also puts them out of reach of the role and
@@ -81,9 +84,11 @@ beforeEach(() => {
   onGet = () => ({ status: 200, data: { users: [] } });
   onPost = () => ({ status: 201, data: { user: { id: "new", ...validInput } } });
   onPatch = () => ({ status: 200, data: { user: rows[0] } });
+  onDelete = () => ({ status: 204 });
   fakeHttp((config) => {
     if (config.method === "post") return onPost();
     if (config.method === "patch") return onPatch();
+    if (config.method === "delete") return onDelete();
     return onGet();
   });
 });
@@ -277,7 +282,7 @@ describe("edit user row", () => {
 
     expect(field("Name")).toHaveValue("Ada Admin");
     expect(field("Email")).toHaveValue("ada@example.com");
-    expect(field("Role")).toHaveValue("admin");
+    expect(field("Role")).toHaveValue(Role.admin);
     // Only the one row opens: the other keeps its pencil and its text.
     expect(
       screen.getByRole("button", { name: "Edit Gene Agent" }),
@@ -295,7 +300,7 @@ describe("edit user row", () => {
 
     await user.clear(field("Name"));
     await user.type(field("Name"), "Ada Lovelace");
-    await user.selectOptions(field("Role"), "agent");
+    await user.selectOptions(field("Role"), Role.agent);
     await user.click(screen.getByRole("button", { name: "Save Ada Admin" }));
 
     expect(patchCalls()).toHaveLength(1);
@@ -303,7 +308,7 @@ describe("edit user row", () => {
     expect(JSON.parse(patchCalls()[0]!.data as string)).toEqual({
       name: "Ada Lovelace",
       email: "ada@example.com",
-      role: "agent",
+      role: Role.agent,
     });
     expect(
       await screen.findByText("Saved changes to ada@example.com."),
@@ -358,7 +363,7 @@ describe("edit user row", () => {
     await openEditor(user, "Gene Agent");
 
     expect(field("Email", "Gene Agent")).toHaveValue("gene@example.com");
-    expect(field("Role", "Gene Agent")).toHaveValue("agent");
+    expect(field("Role", "Gene Agent")).toHaveValue(Role.agent);
   });
 
   test("a rejected save surfaces the server's message and keeps the row open", async () => {
@@ -436,5 +441,87 @@ describe("edit user row", () => {
     await user.type(field("Name"), "{Enter}");
 
     expect(patchCalls()).toHaveLength(1);
+  });
+});
+
+describe("delete user", () => {
+  async function renderLoaded() {
+    onGet = () => ({ status: 200, data: { users: rows } });
+    const user = userEvent.setup();
+    renderWithQuery(<UsersPage />);
+    await findLoadedTable();
+    return user;
+  }
+
+  const openDialog = async (user: UserEvent) => {
+    await user.click(screen.getByRole("button", { name: "Delete Gene Agent" }));
+    return screen.findByRole("alertdialog");
+  };
+
+  test("offers delete for agents but not for admins", async () => {
+    await renderLoaded();
+
+    expect(
+      screen.getByRole("button", { name: "Delete Gene Agent" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Delete Ada Admin" }),
+    ).not.toBeInTheDocument();
+  });
+
+  test("clicking delete asks for confirmation before sending anything", async () => {
+    const user = await renderLoaded();
+
+    const dialog = await openDialog(user);
+
+    expect(within(dialog).getByText("Delete user?")).toBeInTheDocument();
+    expect(within(dialog).getByText(/gene@example\.com/)).toBeInTheDocument();
+    expect(deleteCalls()).toHaveLength(0);
+  });
+
+  test("cancelling closes the dialog and sends nothing", async () => {
+    const user = await renderLoaded();
+    const dialog = await openDialog(user);
+
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+
+    await waitFor(() =>
+      expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument(),
+    );
+    expect(deleteCalls()).toHaveLength(0);
+  });
+
+  test("confirming DELETEs the user, closes the dialog and refreshes the list", async () => {
+    const user = await renderLoaded();
+    const dialog = await openDialog(user);
+
+    await user.click(within(dialog).getByRole("button", { name: "Delete" }));
+
+    expect(deleteCalls()).toHaveLength(1);
+    expect(deleteCalls()[0]!.url).toBe("/api/users/u2");
+    expect(
+      await screen.findByText("Deleted gene@example.com."),
+    ).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument(),
+    );
+    expect(getCalls()).toHaveLength(2);
+  });
+
+  test("a rejected delete shows the server's message and keeps the dialog open", async () => {
+    onDelete = () => ({
+      status: 409,
+      data: { error: "admin users cannot be deleted" },
+    });
+    const user = await renderLoaded();
+    const dialog = await openDialog(user);
+
+    await user.click(within(dialog).getByRole("button", { name: "Delete" }));
+
+    expect(
+      await within(dialog).findByRole("alert"),
+    ).toHaveTextContent("admin users cannot be deleted");
+    expect(screen.getByRole("alertdialog")).toBeInTheDocument();
+    expect(screen.queryByText(/^Deleted /)).not.toBeInTheDocument();
   });
 });

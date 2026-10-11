@@ -4,10 +4,11 @@ import type { ReactNode } from "react";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import type { UserRole } from "core";
 
 const mounted: { container: HTMLDivElement; root: Root }[] = [];
 
-type Session = { user: { role: "admin" | "agent"; name: string } } | null;
+type Session = { user: { role: UserRole; name: string } } | null;
 
 let session: Session = null;
 let sessionPending = false;

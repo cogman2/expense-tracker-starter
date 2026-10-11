@@ -9,7 +9,26 @@ export const ROLES = ["admin", "agent"] as const;
 
 export type UserRole = (typeof ROLES)[number];
 
+/**
+ * The roles by name, so code that means one particular role says `Role.admin`
+ * rather than repeating the string. The `satisfies` clause keeps it exhaustive
+ * and exact: a role added to ROLES fails to compile here until it is listed.
+ */
+export const Role = {
+  admin: "admin",
+  agent: "agent",
+} as const satisfies { [R in UserRole]: R };
+
 export const MIN_PASSWORD_LENGTH = 8;
+
+/**
+ * Whether a user may be soft-deleted. Admin accounts never can — which also
+ * rules out an admin deleting themselves. The server enforces this on
+ * DELETE /api/users/:id; the client uses it only to hide the delete button.
+ */
+export function canDeleteUser(user: { role: UserRole }): boolean {
+  return user.role !== Role.admin;
+}
 
 /**
  * The POST /api/users payload, used by the server to validate the request and by

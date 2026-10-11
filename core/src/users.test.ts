@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  canDeleteUser,
   createUserSchema,
   MIN_PASSWORD_LENGTH,
   ROLES,
@@ -131,5 +132,15 @@ describe("updateUserSchema", () => {
     expect(badRole.success || badRole.error.issues[0]!.message).toBe(
       `role must be one of ${ROLES.join(", ")}`,
     );
+  });
+});
+
+describe("canDeleteUser", () => {
+  test("agents can be deleted", () => {
+    expect(canDeleteUser({ role: "agent" })).toBe(true);
+  });
+
+  test("admins cannot be deleted", () => {
+    expect(canDeleteUser({ role: "admin" })).toBe(false);
   });
 });

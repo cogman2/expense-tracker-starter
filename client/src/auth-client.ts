@@ -1,5 +1,6 @@
 import { createAuthClient } from "better-auth/react";
 import { inferAdditionalFields } from "better-auth/client/plugins";
+import { ROLES } from "core";
 
 // No baseURL: the client targets the current origin + `/api/auth`, which the
 // Vite dev proxy forwards to the Express server's Better Auth mount.
@@ -28,7 +29,7 @@ export const authClient = createAuthClient({
   plugins: [
     inferAdditionalFields({
       user: {
-        role: { type: ["admin", "agent"] },
+        role: { type: [...ROLES] },
       },
     }),
   ],

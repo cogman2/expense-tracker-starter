@@ -1,4 +1,5 @@
 import { betterAuth } from "better-auth";
+import { APIError } from "better-auth/api";
 import { prismaAdapter } from "better-auth/adapters/prisma";
 import { prisma } from "./db";
 
@@ -35,6 +36,25 @@ export const auth = betterAuth({
         required: false,
         defaultValue: "agent",
         input: false,
+      },
+    },
+  },
+  // Soft-deleted users (DELETE /api/users/:id) keep their row and credentials,
+  // so the password check alone would still let them in. Refusing to create
+  // their session blocks every sign-in path; the delete route revokes any
+  // sessions they already held.
+  databaseHooks: {
+    session: {
+      create: {
+        before: async (session) => {
+          const user = await prisma.user.findUnique({
+            where: { id: session.userId },
+            select: { deletedAt: true },
+          });
+          if (user?.deletedAt) {
+            throw new APIError("FORBIDDEN", { message: "account is disabled" });
+          }
+        },
       },
     },
   },
