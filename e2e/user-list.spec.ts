@@ -1,8 +1,8 @@
 import { expect, test } from "@playwright/test";
-import { ADMIN, AGENT, loginAndWaitForHome } from "./auth-helpers";
+import { ADMIN, AGENT } from "./auth-helpers";
 
-// Covers GET /api/users (server/src/routes/users.ts) and the user list table on
-// the admin-only /users page (client/src/UsersPage.tsx).
+// Covers GET /api/users (server/src/routes/users.ts). The users table's happy
+// path through the UI lives in e2e/user-management.spec.ts.
 //
 // NOTE on tooling: like e2e/api-auth.spec.ts and e2e/user-creation.spec.ts,
 // the server-side checks here use the runtime's native `fetch()` instead of
@@ -45,29 +45,6 @@ function getUsers(cookie?: string) {
   return fetch(`${SERVER_URL}/api/users`, {
     headers: cookie ? { Cookie: cookie } : undefined,
   });
-}
-
-type CreateUserBody = {
-  name: string;
-  email: string;
-  password: string;
-  role: string;
-};
-
-function createUser(body: Partial<CreateUserBody>, cookie?: string) {
-  return fetch(`${SERVER_URL}/api/users`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...(cookie ? { Cookie: cookie } : {}),
-    },
-    body: JSON.stringify(body),
-  });
-}
-
-/** Unique-per-test email so parallel tests never collide within a run. */
-function uniqueEmail(label: string): string {
-  return `${label}-${test.info().testId}-${Date.now()}@example.com`;
 }
 
 type UserRow = {
@@ -134,78 +111,5 @@ test.describe("GET /api/users enforcement", () => {
     const timestamps = body.users.map((u) => new Date(u.createdAt).getTime());
     const sorted = [...timestamps].sort((a, b) => a - b);
     expect(timestamps).toEqual(sorted);
-  });
-});
-
-test.describe("GET /api/users reflects newly created users", () => {
-  test("a user created via POST /api/users shows up in the list", async () => {
-    const cookie = await signInAsAdmin();
-    const email = uniqueEmail("list-reflects-create");
-
-    const createRes = await createUser(
-      { name: "List Reflects Create", email, password: "password123", role: "agent" },
-      cookie,
-    );
-    expect(createRes.status).toBe(201);
-
-    const res = await getUsers(cookie);
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as { users: UserRow[] };
-
-    const created = body.users.find((u) => u.email === email);
-    expect(created).toBeTruthy();
-    expect(created?.name).toBe("List Reflects Create");
-    expect(created?.role).toBe("agent");
-  });
-});
-
-test.describe("UI: Users list (/users)", () => {
-  test("admin sees the users table with the seeded accounts", async ({ page }) => {
-    await loginAndWaitForHome(page, ADMIN.email, ADMIN.password);
-    await page.goto("/users");
-
-    await expect(page.getByRole("heading", { name: "Users" })).toBeVisible();
-    await expect(page.getByRole("columnheader", { name: "Name" })).toBeVisible();
-    await expect(page.getByRole("columnheader", { name: "Email" })).toBeVisible();
-    await expect(page.getByRole("columnheader", { name: "Role" })).toBeVisible();
-    await expect(page.getByRole("columnheader", { name: "Created" })).toBeVisible();
-
-    const adminRow = page.getByRole("row").filter({ hasText: ADMIN.email });
-    await expect(adminRow).toBeVisible();
-    await expect(adminRow.getByRole("cell", { name: "admin", exact: true })).toBeVisible();
-
-    const agentRow = page.getByRole("row").filter({ hasText: AGENT.email });
-    await expect(agentRow).toBeVisible();
-    await expect(agentRow.getByRole("cell", { name: "agent", exact: true })).toBeVisible();
-  });
-
-  test("creating a user through the form adds a row to the table without a reload", async ({
-    page,
-  }) => {
-    await loginAndWaitForHome(page, ADMIN.email, ADMIN.password);
-    await page.goto("/users");
-    await expect(page.getByRole("row").filter({ hasText: ADMIN.email })).toBeVisible();
-
-    const email = uniqueEmail("ui-list-created");
-
-    await page.getByLabel("Name").fill("Newly Listed User");
-    await page.getByLabel("Email").fill(email);
-    await page.getByLabel("Password").fill("password123");
-    await page.getByLabel("Role").selectOption("agent");
-    await page.getByRole("button", { name: "Create user" }).click();
-
-    await expect(
-      page.getByText(`Created agent account for ${email}.`),
-    ).toBeVisible();
-
-    const newRow = page.getByRole("row").filter({ hasText: email });
-    await expect(newRow).toBeVisible();
-    // exact: true — the row-editing feature added an "Edit Newly Listed User"
-    // pencil button in the same row, whose cell would otherwise also match
-    // this name as a substring.
-    await expect(
-      newRow.getByRole("cell", { name: "Newly Listed User", exact: true }),
-    ).toBeVisible();
-    await expect(newRow.getByRole("cell", { name: "agent", exact: true })).toBeVisible();
   });
 });

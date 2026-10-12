@@ -232,34 +232,4 @@ test.describe("UI: delete dialog (/users)", () => {
     };
     expect(list.users.map((u) => u.id)).toContain(target.id);
   });
-
-  test("confirming Delete removes the row and shows the confirmation message", async ({
-    page,
-  }) => {
-    const adminCookie = await signInAsAdmin();
-    const target = await createThrowawayUser(adminCookie, "ui-confirm-del");
-
-    await loginAndWaitForHome(page, ADMIN.email, ADMIN.password);
-    await page.goto("/users");
-    const row = page.getByRole("row").filter({ hasText: target.email });
-    await expect(row).toBeVisible();
-
-    await page.getByRole("button", { name: `Delete ${target.name}` }).click();
-    const dialog = page.getByRole("alertdialog");
-    await dialog.getByRole("button", { name: "Delete", exact: true }).click();
-
-    await expect(dialog).toBeHidden();
-    await expect(page.getByText(`Deleted ${target.email}.`)).toBeVisible();
-    await expect(row).toHaveCount(0);
-
-    // Persisted: gone after a reload too, and the user cannot sign in.
-    await page.reload();
-    await expect(
-      page.getByRole("row").filter({ hasText: ADMIN.email }),
-    ).toBeVisible();
-    await expect(
-      page.getByRole("row").filter({ hasText: target.email }),
-    ).toHaveCount(0);
-    expect((await signIn(target.email, "password123")).ok).toBe(false);
-  });
 });

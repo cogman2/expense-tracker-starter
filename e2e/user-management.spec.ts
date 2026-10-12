@@ -81,6 +81,9 @@ test.describe("User management (admin, /users)", () => {
     const row = rowFor(page, user.email);
     await expect(row).toContainText(user.name);
     await expect(row).toContainText(Role.agent);
+    // The form resets on success, ready for the next account.
+    await expect(page.getByLabel("Name", { exact: true })).toHaveValue("");
+    await expect(page.getByLabel("Email", { exact: true })).toHaveValue("");
 
     await signOutAndLoginAs(page, user.email);
     await expect(page).toHaveURL("/");
@@ -90,6 +93,9 @@ test.describe("User management (admin, /users)", () => {
     const user = uniqueUser("Listed");
     await gotoUsersAsAdmin(page);
 
+    for (const column of ["Name", "Email", "Role", "Created"]) {
+      await expect(page.getByRole("columnheader", { name: column })).toBeVisible();
+    }
     const adminRow = rowFor(page, ADMIN.email);
     await expect(adminRow).toContainText(ADMIN.name);
     await expect(adminRow).toContainText(Role.admin);

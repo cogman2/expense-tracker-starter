@@ -212,50 +212,7 @@ test.describe("POST /api/users enforcement", () => {
   });
 });
 
-test.describe("Admin creates a user who can then sign in", () => {
-  test("a newly created account can sign in with the given credentials", async () => {
-    const cookie = await signInAsAdmin();
-    const email = uniqueEmail("new-signin");
-    const password = "brand-new-password";
-
-    const createRes = await createUser(
-      { name: "Fresh Hire", email, password, role: "agent" },
-      cookie,
-    );
-    expect(createRes.status).toBe(201);
-
-    const signInRes = await signIn(email, password);
-    expect(signInRes.status).toBe(200);
-    const signInCookie = sessionCookieFrom(signInRes);
-    expect(signInCookie).toBeTruthy();
-  });
-});
-
 test.describe("UI: Create user form (/users)", () => {
-  test("admin creates a user through the form and sees the success message", async ({
-    page,
-  }) => {
-    await loginAndWaitForHome(page, ADMIN.email, ADMIN.password);
-    await page.goto("/users");
-    await expect(page.getByRole("heading", { name: "Users" })).toBeVisible();
-
-    const email = uniqueEmail("ui-created");
-
-    await page.getByLabel("Name").fill("UI Created User");
-    await page.getByLabel("Email").fill(email);
-    await page.getByLabel("Password").fill("password123");
-    await page.getByLabel("Role").selectOption("admin");
-
-    await page.getByRole("button", { name: "Create user" }).click();
-
-    await expect(
-      page.getByText(`Created admin account for ${email}.`),
-    ).toBeVisible();
-
-    // The form resets on success.
-    await expect(page.getByLabel("Name")).toHaveValue("");
-    await expect(page.getByLabel("Email")).toHaveValue("");
-  });
 
   test("submitting a duplicate email surfaces the server error in the UI", async ({
     page,

@@ -52,34 +52,4 @@ test.describe("Authorization (RequireAdmin)", () => {
     await page.goto("/users");
     await expect(page).toHaveURL("/");
   });
-
-  test("role differences: both admin and agent reach /, only admin reaches /users", async ({
-    browser,
-  }) => {
-    const adminContext = await browser.newContext();
-    const agentContext = await browser.newContext();
-
-    try {
-      const adminPage = await adminContext.newPage();
-      const agentPage = await agentContext.newPage();
-
-      await loginAndWaitForHome(adminPage, ADMIN.email, ADMIN.password);
-      await loginAndWaitForHome(agentPage, AGENT.email, AGENT.password);
-
-      await adminPage.goto("/users");
-      await expect(adminPage).toHaveURL("/users");
-      await expect(
-        adminPage.getByRole("heading", { name: "Users" }),
-      ).toBeVisible();
-
-      await agentPage.goto("/users");
-      await expect(agentPage).toHaveURL("/");
-      await expect(
-        agentPage.getByRole("heading", { name: "Helpdesk" }),
-      ).toBeVisible();
-    } finally {
-      await adminContext.close();
-      await agentContext.close();
-    }
-  });
 });

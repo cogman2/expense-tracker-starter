@@ -6,13 +6,6 @@ import { ADMIN, loginAndWaitForHome } from "./auth-helpers";
 // reachable again, whether via a fresh navigation or the browser's back
 // button.
 test.describe("Sign out", () => {
-  test("sign out returns to /login", async ({ page }) => {
-    await loginAndWaitForHome(page, ADMIN.email, ADMIN.password);
-
-    await page.getByRole("button", { name: "Sign out" }).click();
-
-    await expect(page).toHaveURL("/login");
-  });
 
   test("after sign out, revisiting a protected route redirects to /login", async ({
     page,

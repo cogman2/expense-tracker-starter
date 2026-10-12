@@ -319,59 +319,7 @@ test.describe("PATCH /api/users/:id enforcement", () => {
   });
 });
 
-test.describe("An edited user can sign in with their new email", () => {
-  test("after an admin changes an agent's email, that agent can sign in with the new address", async ({
-    page,
-  }) => {
-    const adminCookie = await signInAsAdmin();
-    const target = await createThrowawayUser(adminCookie, "email-change-signin");
-    const newEmail = uniqueEmail("email-change-signin-new");
-
-    const patchRes = await patchUser(
-      target.id,
-      { name: target.name, email: newEmail, role: "agent" },
-      adminCookie,
-    );
-    expect(patchRes.status).toBe(200);
-
-    await loginAndWaitForHome(page, newEmail, "password123");
-  });
-});
-
 test.describe("UI: row editor (/users)", () => {
-  test("admin edits a row's name through the pencil button and sees it update without a reload", async ({
-    page,
-  }) => {
-    const adminCookie = await signInAsAdmin();
-    const target = await createThrowawayUser(adminCookie, "ui-rename");
-
-    await loginAndWaitForHome(page, ADMIN.email, ADMIN.password);
-    await page.goto("/users");
-    await expect(
-      page.getByRole("row").filter({ hasText: target.email }),
-    ).toBeVisible();
-
-    await page.getByRole("button", { name: `Edit ${target.name}` }).click();
-
-    // Avoid the substrings "name"/"email"/"role" in this literal — see
-    // nameSafeTag's comment: a persisted row containing one of those words
-    // becomes a second match for other specs' plain getByLabel("Name") etc.
-    const newName = "Updated Via The UI";
-    const nameField = page.getByLabel(`Name for ${target.name}`);
-    await nameField.fill(newName);
-    await page.getByRole("button", { name: `Save ${target.name}` }).click();
-
-    await expect(
-      page.getByText(`Saved changes to ${target.email}.`),
-    ).toBeVisible();
-
-    const updatedRow = page.getByRole("row").filter({ hasText: target.email });
-    // exact: true — otherwise this also matches the row's "Edit {newName}"
-    // button, whose cell's accessible name contains newName as a substring.
-    await expect(
-      updatedRow.getByRole("cell", { name: newName, exact: true }),
-    ).toBeVisible();
-  });
 
   test("Cancel discards an edit and nothing is persisted", async ({ page }) => {
     const adminCookie = await signInAsAdmin();
