@@ -4,6 +4,8 @@ import { auth } from "./auth";
 import { authRateLimiter, signInRateLimiter } from "./rate-limit";
 import { prisma } from "./db";
 import { usersRouter } from "./routes/users";
+import { webhooksRouter } from "./routes/webhooks";
+import { jsonErrorHandler } from "./middleware/error-handler";
 
 export interface ApiHealth {
   status: "ok";
@@ -35,6 +37,11 @@ if (process.env.NODE_ENV === "production") {
 // Better Auth mounts the entire /api/auth/* surface. It must be registered
 // before express.json(): the handler consumes the raw request body itself.
 app.all("/api/auth/*", toNodeHandler(auth));
+
+// Above the global JSON parser on purpose: inbound emails can be megabytes, and
+// once express.json() has read a body (100 KB default) the webhook's own larger
+// limit could no longer apply. See routes/webhooks.ts.
+app.use(webhooksRouter);
 
 app.use(express.json());
 
@@ -70,6 +77,11 @@ app.get("/ready", async (_req, res) => {
 // The user routes (profile + admin user administration) live in their own
 // module. Mounted after express.json(), which its POST handler depends on.
 app.use(usersRouter);
+
+// Last, so it catches errors from every route above — including body-parser's
+// for malformed or oversized JSON, which Express would otherwise answer with an
+// HTML page (with a stack trace outside production).
+app.use(jsonErrorHandler);
 
 const server = app.listen(PORT, () => {
   console.log(`[server] listening on http://localhost:${PORT}`);

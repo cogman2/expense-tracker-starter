@@ -2,3 +2,5 @@
 // here must stay runtime-agnostic — no Express, no React, no Prisma, no DOM —
 // because both workspaces import it as source (see package.json exports).
 export * from "./users";
+export * from "./constants/tickets";
+export * from "./schemas/tickets";

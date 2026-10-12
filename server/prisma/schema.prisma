@@ -75,3 +75,58 @@ model Verification {
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 }
+
+// Helpdesk tickets. An email to the support address becomes a Ticket (or joins
+// one) through POST /api/webhooks/inbound-email — see src/routes/webhooks.ts.
+// Statuses mirror TICKET_STATUSES in core/src/constants/tickets.ts
+// (asserted in src/schemas.ts).
+enum TicketStatus {
+  open
+  resolved
+  closed
+}
+
+// Someone who emails support. Separate from User: customers never sign in.
+model Customer {
+  id        String   @id @default(uuid())
+  email     String   @unique // lowercased by the inbound schema
+  name      String?
+  createdAt DateTime @default(now())
+
+  tickets Ticket[]
+}
+
+// An integer id so it can travel in subjects as "[Ticket #42]".
+model Ticket {
+  id         Int          @id @default(autoincrement())
+  subject    String
+  status     TicketStatus @default(open)
+  customerId String
+  customer   Customer     @relation(fields: [customerId], references: [id])
+  createdAt  DateTime     @default(now())
+  updatedAt  DateTime     @updatedAt
+
+  messages Message[]
+
+  @@index([status, createdAt])
+}
+
+// One email in a ticket's thread. messageId is the RFC 5322 Message-ID (without
+// angle brackets): unique, so a redelivered email cannot be stored twice, and
+// what later replies' In-Reply-To / References point at.
+model Message {
+  id         String   @id @default(uuid())
+  ticketId   Int
+  ticket     Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  messageId  String   @unique
+  inReplyTo  String?
+  references String[]
+  fromEmail  String
+  fromName   String?
+  subject    String
+  bodyText   String
+  bodyHtml   String?
+  receivedAt DateTime @default(now())
+
+  @@index([ticketId, receivedAt])
+}

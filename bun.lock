@@ -6,6 +6,7 @@
       "name": "helpdesk",
       "devDependencies": {
         "@playwright/test": "^1.62.1",
+        "@prisma/adapter-pg": "^7.8.0",
         "@types/bun": "^1.2.0",
         "core": "workspace:*",
         "dotenv": "^17.4.2",

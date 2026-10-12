@@ -3,8 +3,11 @@
 // definition; what stays here is how a failed parse becomes an HTTP response, and
 // the guard that keeps core's role union tied to the database's.
 import type { z } from "zod";
-import { ROLES } from "core";
-import type { Role } from "./generated/prisma/enums";
+import { ROLES, TICKET_STATUSES } from "core";
+import type {
+  Role,
+  TicketStatus as PrismaTicketStatus,
+} from "./generated/prisma/enums";
 
 // Compile-time check that core's ROLES and Prisma's Role enum are the same set,
 // in both directions: core cannot offer a role the column lacks, and a new role
@@ -14,6 +17,16 @@ type Assert<T extends true> = T;
 export type RolesMatchPrisma = Assert<
   [Role] extends [(typeof ROLES)[number]]
     ? [(typeof ROLES)[number]] extends [Role]
+      ? true
+      : false
+    : false
+>;
+
+// The same guard for ticket statuses (core/src/constants/tickets.ts). Prisma's
+// enum is aliased because core exports its own `TicketStatus` constant.
+export type TicketStatusesMatchPrisma = Assert<
+  [PrismaTicketStatus] extends [(typeof TICKET_STATUSES)[number]]
+    ? [(typeof TICKET_STATUSES)[number]] extends [PrismaTicketStatus]
       ? true
       : false
     : false

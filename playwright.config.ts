@@ -1,5 +1,6 @@
 import { defineConfig, devices } from "@playwright/test";
 import { TEST_DATABASE_URL } from "./e2e/test-db";
+import { TEST_SUPPORT_EMAIL, TEST_WEBHOOK_SECRET } from "./e2e/webhook-env";
 
 // End-to-end test configuration. Playwright boots its own server + client
 // against an isolated test database (see e2e/global-setup.ts) so runs never
@@ -43,6 +44,8 @@ export default defineConfig({
         DATABASE_URL: TEST_DATABASE_URL,
         NODE_ENV: "test",
         PORT: "3000",
+        WEBHOOK_SECRET: TEST_WEBHOOK_SECRET,
+        SUPPORT_EMAIL_ADDRESS: TEST_SUPPORT_EMAIL,
       },
       reuseExistingServer: false,
       timeout: 60_000,

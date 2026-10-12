@@ -25,7 +25,7 @@ if (!/test/i.test(dbName)) {
 // Better Auth data tables. CASCADE clears FK-linked rows; RESTART IDENTITY
 // resets sequences. The _prisma_migrations table is left intact.
 await prisma.$executeRawUnsafe(
-  'TRUNCATE TABLE "User", "Session", "Account", "Verification" RESTART IDENTITY CASCADE',
+  'TRUNCATE TABLE "Message", "Ticket", "Customer", "User", "Session", "Account", "Verification" RESTART IDENTITY CASCADE',
 );
 
 console.log(`[reset-test-db] truncated all data in "${dbName}"`);
