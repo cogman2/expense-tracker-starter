@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { ADMIN, AGENT } from "./auth-helpers";
+import { Role } from "core";
 
 // Covers GET /api/users (server/src/routes/users.ts). The users table's happy
 // path through the UI lives in e2e/user-management.spec.ts.
@@ -85,8 +86,8 @@ test.describe("GET /api/users enforcement", () => {
     const agent = body.users.find((u) => u.email === AGENT.email);
     expect(admin).toBeTruthy();
     expect(agent).toBeTruthy();
-    expect(admin?.role).toBe("admin");
-    expect(agent?.role).toBe("agent");
+    expect(admin?.role).toBe(Role.admin);
+    expect(agent?.role).toBe(Role.agent);
 
     // Every row must expose exactly id/name/email/role/createdAt — nothing
     // more (no password hash, no session data).

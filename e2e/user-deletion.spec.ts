@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { ADMIN, AGENT, loginAndWaitForHome } from "./auth-helpers";
+import { Role } from "core";
 
 // Covers DELETE /api/users/:id (soft delete, server/src/routes/users.ts), the
 // sign-in block in server/src/auth.ts, and the delete dialog on /users.
@@ -85,7 +86,7 @@ async function createThrowawayUser(
       name: `Doomed ${nameSafeTag(label)}`,
       email: uniqueEmail(label),
       password: "password123",
-      role: "agent",
+      role: Role.agent,
     },
     adminCookie,
   );
@@ -120,7 +121,7 @@ test.describe("DELETE /api/users/:id enforcement", () => {
     const adminCookie = await signInAsAdmin();
     const me = ((await (await getMe(adminCookie)).json()) as { user: ApiUser })
       .user;
-    expect(me.role).toBe("admin");
+    expect(me.role).toBe(Role.admin);
 
     const res = await deleteUser(me.id, adminCookie);
     expect(res.status).toBe(409);
@@ -169,7 +170,7 @@ test.describe("soft-delete lifecycle", () => {
     // PATCH on a deleted user -> 404.
     const patch = await patchUser(
       target.id,
-      { name: "Revived", email: uniqueEmail("revive"), role: "agent" },
+      { name: "Revived", email: uniqueEmail("revive"), role: Role.agent },
       adminCookie,
     );
     expect(patch.status).toBe(404);
@@ -181,7 +182,7 @@ test.describe("soft-delete lifecycle", () => {
         name: "Second Coming",
         email: target.email,
         password: "password123",
-        role: "agent",
+        role: Role.agent,
       },
       adminCookie,
     );

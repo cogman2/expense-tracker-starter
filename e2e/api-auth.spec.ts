@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { ADMIN, AGENT } from "./auth-helpers";
+import { Role } from "core";
 
 // Server-side enforcement checks, hitting the Express/Better Auth server
 // directly on :3000 rather than going through the SPA. This confirms the API
@@ -62,7 +63,7 @@ test.describe("Server-side auth enforcement", () => {
 
     const body = await meRes.json();
     expect(body.user.email).toBe(ADMIN.email);
-    expect(body.user.role).toBe("admin");
+    expect(body.user.role).toBe(Role.admin);
     // The endpoint must never leak the raw session token/object, only the
     // user profile (see server/src/routes/users.ts's comment on /api/me).
     expect(body).not.toHaveProperty("session");
@@ -77,7 +78,7 @@ test.describe("Server-side auth enforcement", () => {
     const body = await meRes.json();
 
     expect(body.user.email).toBe(AGENT.email);
-    expect(body.user.role).toBe("agent");
+    expect(body.user.role).toBe(Role.agent);
   });
 
   test("sign-in with a wrong password is rejected and grants no access", async () => {

@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { ADMIN, AGENT, loginAndWaitForHome } from "./auth-helpers";
+import { Role } from "core";
 
 // Covers POST /api/users (server/src/routes/users.ts) and the "Create user"
 // form on the admin-only /users page (client/src/UsersPage.tsx).
@@ -69,7 +70,7 @@ test.describe("POST /api/users enforcement", () => {
       name: "Nobody",
       email: uniqueEmail("unauth"),
       password: "password123",
-      role: "agent",
+      role: Role.agent,
     });
 
     expect(res.status).toBe(401);
@@ -84,7 +85,7 @@ test.describe("POST /api/users enforcement", () => {
         name: "Should Not Exist",
         email: uniqueEmail("agent-forbidden"),
         password: "password123",
-        role: "agent",
+        role: Role.agent,
       },
       cookie,
     );
@@ -98,7 +99,7 @@ test.describe("POST /api/users enforcement", () => {
     const email = uniqueEmail("valid-admin");
 
     const res = await createUser(
-      { name: "New Agent", email, password: "password123", role: "agent" },
+      { name: "New Agent", email, password: "password123", role: Role.agent },
       cookie,
     );
 
@@ -109,7 +110,7 @@ test.describe("POST /api/users enforcement", () => {
         id: expect.any(String),
         name: "New Agent",
         email,
-        role: "agent",
+        role: Role.agent,
       },
     });
     // Never leak the password hash or any session data alongside the user.
@@ -125,13 +126,13 @@ test.describe("POST /api/users enforcement", () => {
     const email = uniqueEmail("duplicate");
 
     const first = await createUser(
-      { name: "First", email, password: "password123", role: "agent" },
+      { name: "First", email, password: "password123", role: Role.agent },
       cookie,
     );
     expect(first.status).toBe(201);
 
     const second = await createUser(
-      { name: "Second", email, password: "password123", role: "agent" },
+      { name: "Second", email, password: "password123", role: Role.agent },
       cookie,
     );
     expect(second.status).toBe(409);
@@ -148,7 +149,7 @@ test.describe("POST /api/users enforcement", () => {
         name: "Short Password",
         email: uniqueEmail("short-password"),
         password: "short",
-        role: "agent",
+        role: Role.agent,
       },
       cookie,
     );
@@ -166,7 +167,7 @@ test.describe("POST /api/users enforcement", () => {
         name: "Bad Email",
         email: "not-an-email",
         password: "password123",
-        role: "agent",
+        role: Role.agent,
       },
       cookie,
     );
@@ -201,7 +202,7 @@ test.describe("POST /api/users enforcement", () => {
       {
         email: uniqueEmail("missing-name"),
         password: "password123",
-        role: "agent",
+        role: Role.agent,
       },
       cookie,
     );
@@ -220,7 +221,7 @@ test.describe("UI: Create user form (/users)", () => {
     const cookie = await signInAsAdmin();
     const email = uniqueEmail("ui-duplicate");
     const seedRes = await createUser(
-      { name: "Already Exists", email, password: "password123", role: "agent" },
+      { name: "Already Exists", email, password: "password123", role: Role.agent },
       cookie,
     );
     expect(seedRes.status).toBe(201);
@@ -231,7 +232,7 @@ test.describe("UI: Create user form (/users)", () => {
     await page.getByLabel("Name").fill("Duplicate Attempt");
     await page.getByLabel("Email").fill(email);
     await page.getByLabel("Password").fill("password123");
-    await page.getByLabel("Role").selectOption("agent");
+    await page.getByLabel("Role").selectOption(Role.agent);
 
     await page.getByRole("button", { name: "Create user" }).click();
 

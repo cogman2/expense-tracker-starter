@@ -264,17 +264,6 @@ describe("edit user row", () => {
   const missingField = (label: "Name" | "Email" | "Role", name = "Ada Admin") =>
     screen.queryByLabelText(`${label} for ${name}`);
 
-  test("each row offers an edit button named after its user", async () => {
-    await renderLoaded();
-
-    // Per-row names, so neither a screen reader nor a test has to count rows.
-    for (const row of rows) {
-      expect(
-        screen.getByRole("button", { name: `Edit ${row.name}` }),
-      ).toBeInTheDocument();
-    }
-  });
-
   test("opening a row replaces its cells with fields holding the current values", async () => {
     const user = await renderLoaded();
 

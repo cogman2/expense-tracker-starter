@@ -2,6 +2,7 @@ import { execSync } from "node:child_process";
 import path from "node:path";
 import type { FullConfig } from "@playwright/test";
 import { TEST_DATABASE_URL, assertIsTestDatabase, maskUrl } from "./test-db";
+import { Role } from "core";
 
 const serverDir = path.resolve(process.cwd(), "server");
 
@@ -33,12 +34,12 @@ export default async function globalSetup(_config: FullConfig) {
     SEED_USER_EMAIL: "admin@example.com",
     SEED_USER_PASSWORD: "password123",
     SEED_USER_NAME: "Admin",
-    SEED_USER_ROLE: "admin",
+    SEED_USER_ROLE: Role.admin,
   });
   run("bun run prisma/seed.ts", {
     SEED_USER_EMAIL: "agent@example.com",
     SEED_USER_PASSWORD: "password123",
     SEED_USER_NAME: "Agent",
-    SEED_USER_ROLE: "agent",
+    SEED_USER_ROLE: Role.agent,
   });
 }

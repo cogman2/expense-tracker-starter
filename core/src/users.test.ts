@@ -3,6 +3,7 @@ import {
   canDeleteUser,
   createUserSchema,
   MIN_PASSWORD_LENGTH,
+  Role,
   ROLES,
   updateUserSchema,
 } from "./users";
@@ -12,7 +13,7 @@ const valid = {
   email: "new@example.com",
   password: "password123",
   // `as const` so the fixture satisfies the schema's narrowed input type.
-  role: "agent" as const,
+  role: Role.agent,
 };
 
 /** The first issue's message — what the server answers a rejected body with. */
@@ -137,10 +138,10 @@ describe("updateUserSchema", () => {
 
 describe("canDeleteUser", () => {
   test("agents can be deleted", () => {
-    expect(canDeleteUser({ role: "agent" })).toBe(true);
+    expect(canDeleteUser({ role: Role.agent })).toBe(true);
   });
 
   test("admins cannot be deleted", () => {
-    expect(canDeleteUser({ role: "admin" })).toBe(false);
+    expect(canDeleteUser({ role: Role.admin })).toBe(false);
   });
 });
