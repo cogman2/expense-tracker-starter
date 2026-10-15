@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { buildEmail, createTicket, post, uid } from "./inbound-helpers";
+import { TEST_SUPPORT_EMAIL } from "./webhook-env";
 
 // Covers POST /api/webhooks/inbound-email (server/src/routes/webhooks.ts) at the
 // HTTP level: what the response says. What gets stored — and most threading,
@@ -45,5 +46,22 @@ test.describe("inbound email webhook: threading", () => {
     );
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ ticketId, outcome: "appended" });
+  });
+});
+
+test.describe("inbound email webhook: recipients", () => {
+  // Addresses are case-insensitive in practice; a mail client may upper-case the
+  // support address and the email must still become a ticket, not be ignored.
+  test("the support address in mixed case is accepted", async () => {
+    const res = await post(buildEmail({ to: [TEST_SUPPORT_EMAIL.toUpperCase()] }));
+    expect(res.status).toBe(201);
+    expect(((await res.json()) as { outcome: string }).outcome).toBe("created");
+  });
+
+  // A message sent to several people is still for support if support is among them.
+  test("support among several recipients is accepted", async () => {
+    const res = await post(buildEmail({ to: ["someone-else@example.com", TEST_SUPPORT_EMAIL] }));
+    expect(res.status).toBe(201);
+    expect(((await res.json()) as { outcome: string }).outcome).toBe("created");
   });
 });

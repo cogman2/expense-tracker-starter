@@ -1,4 +1,6 @@
 import { expect, test } from "@playwright/test";
+import { db } from "./db";
+import { buildEmail } from "./inbound-helpers";
 import { TEST_WEBHOOK_SECRET } from "./webhook-env";
 
 // Covers the app-wide JSON error handler (server/src/middleware/error-handler.ts).
@@ -37,6 +39,23 @@ async function expectJsonError(res: Response, status: number, error: string) {
 
 test.describe("webhook route errors", () => {
   const secret = { "X-Webhook-Secret": TEST_WEBHOOK_SECRET };
+
+  test.afterAll(async () => {
+    await db.$disconnect();
+  });
+
+  // express.json() skips non-JSON content types, so the body reaches the schema as
+  // {} and is rejected there; nothing from the email may be stored.
+  test("a non-JSON Content-Type with the correct secret gets 400 and stores nothing", async () => {
+    const email = buildEmail();
+    const res = await post(WEBHOOK_URL, JSON.stringify(email), {
+      ...secret,
+      "Content-Type": "text/plain",
+    });
+    await expectJsonError(res, 400, "messageId is required");
+    expect(await db.message.count({ where: { messageId: email.messageId } })).toBe(0);
+    expect(await db.customer.count({ where: { email: email.from.email } })).toBe(0);
+  });
 
   test("malformed JSON with the correct secret gets 400 invalid JSON body", async () => {
     const res = await post(WEBHOOK_URL, MALFORMED_JSON, secret);
