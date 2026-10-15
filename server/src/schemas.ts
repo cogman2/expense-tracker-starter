@@ -3,9 +3,10 @@
 // definition; what stays here is how a failed parse becomes an HTTP response, and
 // the guard that keeps core's role union tied to the database's.
 import type { z } from "zod";
-import { ROLES, TICKET_STATUSES } from "core";
+import { ROLES, TICKET_CATEGORIES, TICKET_STATUSES } from "core";
 import type {
   Role,
+  TicketCategory as PrismaTicketCategory,
   TicketStatus as PrismaTicketStatus,
 } from "./generated/prisma/enums";
 
@@ -27,6 +28,15 @@ export type RolesMatchPrisma = Assert<
 export type TicketStatusesMatchPrisma = Assert<
   [PrismaTicketStatus] extends [(typeof TICKET_STATUSES)[number]]
     ? [(typeof TICKET_STATUSES)[number]] extends [PrismaTicketStatus]
+      ? true
+      : false
+    : false
+>;
+
+// And for ticket categories, aliased for the same reason.
+export type TicketCategoriesMatchPrisma = Assert<
+  [PrismaTicketCategory] extends [(typeof TICKET_CATEGORIES)[number]]
+    ? [(typeof TICKET_CATEGORIES)[number]] extends [PrismaTicketCategory]
       ? true
       : false
     : false

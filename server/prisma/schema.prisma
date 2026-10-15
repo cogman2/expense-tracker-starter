@@ -22,17 +22,17 @@ enum Role {
 // to Better Auth via `user.additionalFields` in src/auth.ts. Credentials live
 // in the `account` table (provider "credential"), not on the user.
 model User {
-  id            String   @id @default(uuid())
+  id            String    @id @default(uuid())
   name          String
-  email         String   @unique
-  emailVerified Boolean  @default(false)
+  email         String    @unique
+  emailVerified Boolean   @default(false)
   image         String?
-  role          Role     @default(agent)
+  role          Role      @default(agent)
   // Soft delete: set when an admin deletes the account. The row (and its
   // email) is kept; deleted users are hidden from the API and cannot sign in.
   deletedAt     DateTime?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 
   sessions Session[]
   accounts Account[]
@@ -86,6 +86,14 @@ enum TicketStatus {
   closed
 }
 
+// Categories mirror TICKET_CATEGORIES in core/src/constants/tickets.ts
+// (asserted in src/schemas.ts).
+enum TicketCategory {
+  general_question
+  technical_question
+  refund_request
+}
+
 // Someone who emails support. Separate from User: customers never sign in.
 model Customer {
   id        String   @id @default(uuid())
@@ -98,13 +106,14 @@ model Customer {
 
 // An integer id so it can travel in subjects as "[Ticket #42]".
 model Ticket {
-  id         Int          @id @default(autoincrement())
+  id         Int             @id @default(autoincrement())
   subject    String
-  status     TicketStatus @default(open)
+  status     TicketStatus    @default(open)
+  category   TicketCategory? // null until someone categorizes the ticket
   customerId String
-  customer   Customer     @relation(fields: [customerId], references: [id])
-  createdAt  DateTime     @default(now())
-  updatedAt  DateTime     @updatedAt
+  customer   Customer        @relation(fields: [customerId], references: [id])
+  createdAt  DateTime        @default(now())
+  updatedAt  DateTime        @updatedAt
 
   messages Message[]
 

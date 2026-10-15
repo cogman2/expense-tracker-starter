@@ -43,6 +43,7 @@ test.describe("inbound email storage: stored data", () => {
     });
     expect(ticket.subject).toBe(`Printer on fire ${id}`);
     expect(ticket.status).toBe(TicketStatus.open);
+    expect(ticket.category).toBeNull(); // inbound email arrives uncategorized
     expect(ticket.customer.email).toBe(sender.toLowerCase());
     expect(ticket.customer.name).toBe("Jane Doe");
 
