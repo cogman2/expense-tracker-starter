@@ -4,6 +4,10 @@ Guidance for Claude Code when working in this repository.
 
 ## Project
 
+## Plan mode:
+Always produce a numbered, step-by-step plan before executing any multi-file task.
+Explicitly list which specific files will change and the risk of touching each module.   
+
 Bun workspace ("helpdesk"): `core/` (shared zod contracts), `client/` (React +
 React Router + Vite) and `server/` (Express + Better Auth + Prisma/PostgreSQL).
 All tooling runs on Bun.
