@@ -1,0 +1,142 @@
+// Prisma schema for the helpdesk server.
+// Uses the new `prisma-client` generator (query compiler / WASM, no native
+// query-engine binary) with the `@prisma/adapter-pg` driver adapter on Bun.
+generator client {
+  provider   = "prisma-client"
+  output     = "../src/generated/prisma"
+  engineType = "client"
+  runtime    = "bun"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  admin
+  agent
+}
+
+// Auth tables owned by Better Auth (email/password + database sessions).
+// Default Better Auth models plus a helpdesk-specific `role` column, exposed
+// to Better Auth via `user.additionalFields` in src/auth.ts. Credentials live
+// in the `account` table (provider "credential"), not on the user.
+model User {
+  id            String    @id @default(uuid())
+  name          String
+  email         String    @unique
+  emailVerified Boolean   @default(false)
+  image         String?
+  role          Role      @default(agent)
+  // Soft delete: set when an admin deletes the account. The row (and its
+  // email) is kept; deleted users are hidden from the API and cannot sign in.
+  deletedAt     DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  sessions Session[]
+  accounts Account[]
+}
+
+model Session {
+  id        String   @id @default(uuid())
+  expiresAt DateTime
+  token     String   @unique
+  ipAddress String?
+  userAgent String?
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Account {
+  id                    String    @id @default(uuid())
+  accountId             String
+  providerId            String
+  userId                String
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+}
+
+model Verification {
+  id         String   @id @default(uuid())
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+// Helpdesk tickets. An email to the support address becomes a Ticket (or joins
+// one) through POST /api/webhooks/inbound-email — see src/routes/webhooks.ts.
+// Statuses mirror TICKET_STATUSES in core/src/constants/tickets.ts
+// (asserted in src/schemas.ts).
+enum TicketStatus {
+  open
+  resolved
+  closed
+}
+
+// Categories mirror TICKET_CATEGORIES in core/src/constants/tickets.ts
+// (asserted in src/schemas.ts).
+enum TicketCategory {
+  general_question
+  technical_question
+  refund_request
+}
+
+// Someone who emails support. Separate from User: customers never sign in.
+model Customer {
+  id        String   @id @default(uuid())
+  email     String   @unique // lowercased by the inbound schema
+  name      String?
+  createdAt DateTime @default(now())
+
+  tickets Ticket[]
+}
+
+// An integer id so it can travel in subjects as "[Ticket #42]".
+model Ticket {
+  id         Int             @id @default(autoincrement())
+  subject    String
+  status     TicketStatus    @default(open)
+  category   TicketCategory? // null until someone categorizes the ticket
+  customerId String
+  customer   Customer        @relation(fields: [customerId], references: [id])
+  createdAt  DateTime        @default(now())
+  updatedAt  DateTime        @updatedAt
+
+  messages Message[]
+
+  @@index([status, createdAt])
+  @@index([createdAt]) // the ticket list's newest-first sort
+}
+
+// One email in a ticket's thread. messageId is the RFC 5322 Message-ID (without
+// angle brackets): unique, so a redelivered email cannot be stored twice, and
+// what later replies' In-Reply-To / References point at.
+model Message {
+  id         String   @id @default(uuid())
+  ticketId   Int
+  ticket     Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  messageId  String   @unique
+  inReplyTo  String?
+  references String[]
+  fromEmail  String
+  fromName   String?
+  subject    String
+  bodyText   String
+  bodyHtml   String?
+  receivedAt DateTime @default(now())
+
+  @@index([ticketId, receivedAt])
+}
