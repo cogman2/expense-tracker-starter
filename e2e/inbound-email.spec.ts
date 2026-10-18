@@ -50,17 +50,12 @@ test.describe("inbound email webhook: threading", () => {
 });
 
 test.describe("inbound email webhook: recipients", () => {
-  // Addresses are case-insensitive in practice; a mail client may upper-case the
-  // support address and the email must still become a ticket, not be ignored.
-  test("the support address in mixed case is accepted", async () => {
-    const res = await post(buildEmail({ to: [TEST_SUPPORT_EMAIL.toUpperCase()] }));
-    expect(res.status).toBe(201);
-    expect(((await res.json()) as { outcome: string }).outcome).toBe("created");
-  });
-
-  // A message sent to several people is still for support if support is among them.
-  test("support among several recipients is accepted", async () => {
-    const res = await post(buildEmail({ to: ["someone-else@example.com", TEST_SUPPORT_EMAIL] }));
+  // A mail client may upper-case the support address, and real mail is often
+  // sent to several people: support in either form must still make a ticket.
+  test("support in mixed case among several recipients is accepted", async () => {
+    const res = await post(
+      buildEmail({ to: ["someone-else@example.com", TEST_SUPPORT_EMAIL.toUpperCase()] }),
+    );
     expect(res.status).toBe(201);
     expect(((await res.json()) as { outcome: string }).outcome).toBe("created");
   });
