@@ -1,4 +1,4 @@
-import { useNavigate } from "react-router";
+import { Link, useNavigate } from "react-router";
 import { useQuery } from "@tanstack/react-query";
 import { signOut, useSession } from "./auth-client";
 import { getHealth } from "@/lib/api";
@@ -25,7 +25,12 @@ export function HomePage() {
   return (
     <div className="font-sans text-gray-900">
       <nav className="flex items-center justify-between border-b border-gray-200 px-8 py-4">
-        <strong>Helpdesk</strong>
+        <div className="flex items-center gap-6">
+          <strong>Helpdesk</strong>
+          <Link to="/tickets" className="text-gray-700 hover:text-gray-900">
+            Tickets
+          </Link>
+        </div>
         <div className="flex items-center gap-4">
           <span>{session?.user.name}</span>
           <button

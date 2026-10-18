@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, mock, test } from "bun:test";
-import { MemoryRouter } from "react-router";
+import { act } from "react";
+import { MemoryRouter, Route, Routes } from "react-router";
 import { Role } from "core";
 import {
   authClientMock,
@@ -56,5 +57,31 @@ describe("HomePage server status", () => {
     expect(text).toContain("Request failed with status code 500");
     expect(text).not.toContain("Server status:");
     expect(text).not.toContain("lying");
+  });
+});
+
+describe("HomePage navigation", () => {
+  test("the Tickets link navigates to /tickets", async () => {
+    setSession({ user: { role: Role.agent, name: "Agent" } });
+    respondWith(200, { status: "ok", service: "helpdesk-server", timestamp: "" });
+
+    // A stub stands in for the real page: this checks the link's route, not
+    // TicketsPage (covered by TicketsPage.test.tsx).
+    const container = await renderComponent(
+      <MemoryRouter initialEntries={["/"]}>
+        <Routes>
+          <Route path="/" element={<HomePage />} />
+          <Route path="/tickets" element={<p>tickets page</p>} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    const link = [...container.querySelectorAll("a")].find(
+      (a) => a.textContent === "Tickets",
+    );
+    expect(link).toBeDefined();
+    await act(async () => link!.click());
+
+    expect(container.textContent).toContain("tickets page");
   });
 });

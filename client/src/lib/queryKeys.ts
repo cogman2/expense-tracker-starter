@@ -13,10 +13,19 @@ export interface UserFilters {
   search?: string;
 }
 
+/** Which slice of the ticket list. Filters join `page` here later. */
+export interface TicketFilters {
+  page: number;
+}
+
 export const queryKeys = {
   health: ["health"] as const,
   users: {
     all: ["users"] as const,
     list: (filters?: UserFilters) => ["users", "list", filters ?? {}] as const,
+  },
+  tickets: {
+    all: ["tickets"] as const,
+    list: (filters: TicketFilters) => ["tickets", "list", filters] as const,
   },
 } as const;

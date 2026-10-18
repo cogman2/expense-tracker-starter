@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { inboundEmailSchema, NO_SUBJECT } from "./tickets";
+import { inboundEmailSchema, NO_SUBJECT, ticketListQuerySchema } from "./tickets";
 
 const valid = {
   messageId: "<abc123@mail.example.com>",
@@ -85,5 +85,30 @@ describe("inboundEmailSchema", () => {
 
   test("rejects a body that is not an object", () => {
     expect(inboundEmailSchema.safeParse("hello").success).toBe(false);
+  });
+});
+
+describe("ticketListQuerySchema", () => {
+  test("a missing page means the first page", () => {
+    expect(ticketListQuerySchema.parse({})).toEqual({ page: 1 });
+  });
+
+  test("coerces the query-string value to a number", () => {
+    expect(ticketListQuerySchema.parse({ page: "2" })).toEqual({ page: 2 });
+  });
+
+  test("rejects a page that is not a whole number of 1 or more", () => {
+    for (const page of ["0", "-1", "abc", "1.5", ""]) {
+      const parsed = ticketListQuerySchema.safeParse({ page });
+      expect(parsed.success).toBe(false);
+      expect(parsed.error?.issues[0]?.message).toBe(
+        "page must be a whole number of 1 or more",
+      );
+    }
+  });
+
+  test("rejects an absurdly large page", () => {
+    const parsed = ticketListQuerySchema.safeParse({ page: "1e12" });
+    expect(parsed.error?.issues[0]?.message).toBe("page is too large");
   });
 });

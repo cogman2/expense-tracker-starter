@@ -3,6 +3,7 @@ import { LoginPage } from "./LoginPage";
 import { RequireAuth } from "./RequireAuth";
 import { RequireAdmin } from "./RequireAdmin";
 import { HomePage } from "./HomePage";
+import { TicketsPage } from "./TicketsPage";
 import { UsersPage } from "./UsersPage";
 
 export function App() {
@@ -11,6 +12,8 @@ export function App() {
       <Route path="/login" element={<LoginPage />} />
       <Route element={<RequireAuth />}>
         <Route path="/" element={<HomePage />} />
+        {/* Every signed-in user works tickets, so no RequireAdmin here. */}
+        <Route path="/tickets" element={<TicketsPage />} />
         {/* /users is the admin section: RequireAdmin guards it and every
             child route below, which render in its <Outlet />. Add new
             admin routes here as children (they live at /users/*). */}

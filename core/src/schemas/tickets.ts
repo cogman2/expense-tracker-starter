@@ -72,3 +72,27 @@ export const inboundEmailSchema = z.object({
 
 /** The parsed payload: bracket-free ids, lowercased addresses, a subject. */
 export type InboundEmailInput = z.infer<typeof inboundEmailSchema>;
+
+/** How many tickets one page of GET /api/tickets holds. */
+export const TICKETS_PAGE_SIZE = 25;
+
+// Far beyond any real ticket count, but it keeps the offset the server computes
+// from (page - 1) * TICKETS_PAGE_SIZE a sane number.
+const MAX_TICKETS_PAGE = 100_000;
+
+const PAGE_MESSAGE = "page must be a whole number of 1 or more";
+
+/**
+ * The GET /api/tickets query string. Query values arrive as strings, so `page`
+ * is coerced; a missing one means the first page.
+ */
+export const ticketListQuerySchema = z.object({
+  page: z.coerce
+    .number({ error: PAGE_MESSAGE })
+    .int(PAGE_MESSAGE)
+    .min(1, PAGE_MESSAGE)
+    .max(MAX_TICKETS_PAGE, "page is too large")
+    .default(1),
+});
+
+export type TicketListQuery = z.infer<typeof ticketListQuerySchema>;

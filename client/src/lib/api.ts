@@ -1,7 +1,12 @@
 // The client's HTTP layer. Every call to our own Express API goes through here
 // (Better Auth is the exception — it ships its own fetch layer, see auth-client).
 import axios from "axios";
-import type { CreateUserInput, UpdateUserInput, UserRole } from "core";
+import type {
+  CreateUserInput,
+  TicketStatusValue,
+  UpdateUserInput,
+  UserRole,
+} from "core";
 
 // No baseURL: paths are written out in full so the Vite dev proxy rules apply as
 // written. The proxy treats them asymmetrically — `/api/users`, `/api/me` and
@@ -80,6 +85,34 @@ export async function updateUser(
 // deleted (409).
 export async function deleteUser(id: string, signal?: AbortSignal): Promise<void> {
   await api.delete(`/api/users/${id}`, { signal });
+}
+
+export interface TicketRow {
+  id: number;
+  subject: string;
+  status: TicketStatusValue;
+  createdAt: string;
+  customer: { name: string | null; email: string };
+}
+
+/** One page of the ticket list, newest first. */
+export interface TicketPage {
+  tickets: TicketRow[];
+  /** Every ticket, not just this page's. */
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+export async function getTickets(
+  page: number,
+  signal?: AbortSignal,
+): Promise<TicketPage> {
+  const { data } = await api.get<TicketPage>("/api/tickets", {
+    params: { page },
+    signal,
+  });
+  return data;
 }
 
 // Surfaces the server's `{ error }` message from a failed response, falling back

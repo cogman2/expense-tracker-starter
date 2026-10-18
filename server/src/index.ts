@@ -3,6 +3,7 @@ import { toNodeHandler } from "better-auth/node";
 import { auth } from "./auth";
 import { authRateLimiter, signInRateLimiter } from "./rate-limit";
 import { prisma } from "./db";
+import { ticketsRouter } from "./routes/tickets";
 import { usersRouter } from "./routes/users";
 import { webhooksRouter } from "./routes/webhooks";
 import { jsonErrorHandler } from "./middleware/error-handler";
@@ -77,6 +78,9 @@ app.get("/ready", async (_req, res) => {
 // The user routes (profile + admin user administration) live in their own
 // module. Mounted after express.json(), which its POST handler depends on.
 app.use(usersRouter);
+
+// The ticket list (any signed-in user).
+app.use(ticketsRouter);
 
 // Last, so it catches errors from every route above — including body-parser's
 // for malformed or oversized JSON, which Express would otherwise answer with an
