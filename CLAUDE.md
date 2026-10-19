@@ -92,6 +92,21 @@ The repo has three kinds of tests:
   root, or `bun test` inside `client/`.
 - **End-to-end tests** — Playwright, described below.
 
+### Choosing a test type — prefer component tests
+
+**Default to component tests** (`client/src/*.test.tsx`) for new UI coverage:
+rendering, form validation, role-based visibility of controls, loading/error
+states, pagination, navigation and route guards (mock the API layer in
+`client/src/lib/api.ts`). Put pure rules in core/server unit tests.
+
+**Write an e2e test only when the behavior can't be verified without the real
+stack** — e.g. the server actually enforcing auth/authorization, Better Auth
+sessions and cookies, database persistence across requests, inbound email /
+webhooks, or the 400-message API contract. Don't add an e2e spec that merely
+duplicates what a component test already covers; when touching an existing e2e
+spec that only checks client-side behavior, consider moving it to a component
+test.
+
 **Always type-check after changing tests:** `bun run typecheck` covers core, the
 client (including component specs), the server and the e2e/config files.
 
@@ -111,16 +126,17 @@ bun run test:e2e        # headless
 bun run test:e2e:ui     # interactive
 ```
 
-### Writing tests — use the `e2e-test-writer` agent
+### Writing e2e tests — use the `e2e-test-writer` agent
 
-When asked to write, add, or extend Playwright end-to-end tests — login flows,
-route guards, admin gating, auth, navigation, or coverage for a newly landed
-user-facing feature — use the **`e2e-test-writer`** subagent (via the Agent tool)
-rather than writing the specs directly. It knows this repo's Playwright setup, the
-seeded accounts, and the app's routes/guards.
+When an e2e test is warranted (see "Choosing a test type" above) — or the user
+explicitly asks to write, add, or extend a Playwright test — use the
+**`e2e-test-writer`** subagent (via the Agent tool) rather than writing the specs
+directly. It knows this repo's Playwright setup, the seeded accounts, and the
+app's routes/guards. A newly landed UI feature gets component tests by default,
+not this agent.
 
 - Trigger it for requests like "write an e2e test for…", "add a Playwright test
-  for…", or after a UI feature merges and needs browser coverage.
+  for…", or when a feature needs coverage only the full stack can give.
 - Give it the flow to cover; it reads the relevant client components to get real
   selectors, writes the spec in `e2e/`, and runs `bun run test:e2e` +
   `bun run typecheck:e2e` until green before reporting back.
