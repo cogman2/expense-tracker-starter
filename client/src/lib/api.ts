@@ -3,6 +3,9 @@
 import axios from "axios";
 import type {
   CreateUserInput,
+  SortOrderValue,
+  TicketListQuery,
+  TicketSortFieldValue,
   TicketStatusValue,
   UpdateUserInput,
   UserRole,
@@ -95,21 +98,25 @@ export interface TicketRow {
   customer: { name: string | null; email: string };
 }
 
-/** One page of the ticket list, newest first. */
+/** One page of the ticket list, in the order the server was asked for. */
 export interface TicketPage {
   tickets: TicketRow[];
   /** Every ticket, not just this page's. */
   total: number;
   page: number;
   pageSize: number;
+  sort: TicketSortFieldValue;
+  order: SortOrderValue;
 }
 
+// The server sorts (it is the only side that sees every page), so the sort goes
+// out as query params alongside the page.
 export async function getTickets(
-  page: number,
+  query: TicketListQuery,
   signal?: AbortSignal,
 ): Promise<TicketPage> {
   const { data } = await api.get<TicketPage>("/api/tickets", {
-    params: { page },
+    params: query,
     signal,
   });
   return data;

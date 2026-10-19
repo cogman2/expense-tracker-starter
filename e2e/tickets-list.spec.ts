@@ -1,6 +1,14 @@
 import { expect, test } from "@playwright/test";
-import { TicketStatus } from "core";
+import {
+  SortOrder,
+  TicketSortField,
+  TicketStatus,
+  type SortOrderValue,
+  type TicketSortFieldValue,
+  type TicketStatusValue,
+} from "core";
 import { AGENT, loginAndWaitForHome } from "./auth-helpers";
+import { db } from "./db";
 import { buildEmail, createTicket, uid } from "./inbound-helpers";
 
 // The DB is shared with specs running in parallel (inbound-*), so nothing here
@@ -21,7 +29,14 @@ type ApiTicket = {
   createdAt: string;
   customer: { name: string | null; email: string };
 };
-type TicketList = { tickets: ApiTicket[]; total: number; page: number; pageSize: number };
+type TicketList = {
+  tickets: ApiTicket[];
+  total: number;
+  page: number;
+  pageSize: number;
+  sort: TicketSortFieldValue;
+  order: SortOrderValue;
+};
 
 async function agentCookie(): Promise<string> {
   const res = await fetch(`${SERVER_URL}/api/auth/sign-in/email`, {
@@ -48,6 +63,29 @@ async function newTicket(tag = uid()) {
   });
   return { id: ticketId, subject, name, email: (base.from as { email: string }).email };
 }
+
+/** Walks every page of a sorted listing; returns the tickets matching `keep`, deduped by id, in server order. */
+async function walkSorted(
+  cookie: string,
+  sort: TicketSortFieldValue,
+  order: SortOrderValue,
+  keep: (t: ApiTicket) => boolean,
+) {
+  const seen = new Map<number, ApiTicket>();
+  for (let page = 1; ; page++) {
+    const res = await listTickets(cookie, `?sort=${sort}&order=${order}&page=${page}`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as TicketList;
+    expect(body).toMatchObject({ sort, order });
+    if (body.tickets.length === 0) break;
+    for (const t of body.tickets) if (keep(t) && !seen.has(t.id)) seen.set(t.id, t);
+  }
+  return [...seen.values()];
+}
+
+test.afterAll(async () => {
+  await db.$disconnect();
+});
 
 test.describe("GET /api/tickets", () => {
   test("is 401 when unauthenticated", async () => {
@@ -80,6 +118,81 @@ test.describe("GET /api/tickets", () => {
     expect(res.status).toBe(400);
     expect(await res.json()).toEqual({
       error: "page must be a whole number of 1 or more",
+    });
+  });
+
+  // Sorting must happen in the database across ALL tickets, so our tickets may
+  // land on any page. Rather than rely on a prefix that sorts first/last (collation
+  // dependent), walk every page and keep only our run-unique tickets, in the order
+  // the server returned them.
+  test("sorts by subject in the database, ascending and descending", async () => {
+    const run = uid();
+    // Created out of alphabetical order so insertion order can't pass the test.
+    const created = [await newTicket(`${run} b`), await newTicket(`${run} c`), await newTicket(`${run} a`)];
+    const cookie = await agentCookie();
+    const ourSubjects = (order: SortOrderValue) =>
+      walkSorted(cookie, TicketSortField.subject, order, (t) => t.subject.includes(run)).then((ts) =>
+        ts.map((t) => t.subject),
+      );
+
+    const asc = created.map((t) => t.subject).sort();
+    expect(await ourSubjects(SortOrder.asc)).toEqual(asc);
+    expect(await ourSubjects(SortOrder.desc)).toEqual([...asc].reverse());
+  });
+
+  // Null ordering is Postgres behaviour (Prisma `nulls: "last"`), so it needs the real DB.
+  test("sorts by customer name then email, unnamed customers last in both directions", async () => {
+    const run = uid();
+    // Created out of order; the unnamed customer's email would sort first alphabetically.
+    const mk = async (email: string, name?: string) => {
+      const { ticketId } = await createTicket({
+        subject: `Cust ${run}`,
+        from: name === undefined ? { email } : { email, name },
+      });
+      return ticketId;
+    };
+    const b = await mk(`${run}-b@example.com`, `${run} B`);
+    const unnamed = await mk(`${run}-0@example.com`);
+    const a = await mk(`${run}-z@example.com`, `${run} A`);
+    const cookie = await agentCookie();
+    const ours = (order: SortOrderValue) =>
+      walkSorted(cookie, TicketSortField.customer, order, (t) => t.customer.email.includes(run)).then((ts) =>
+        ts.map((t) => t.id),
+      );
+
+    expect(await ours(SortOrder.asc)).toEqual([a, b, unnamed]);
+    expect(await ours(SortOrder.desc)).toEqual([b, a, unnamed]);
+  });
+
+  // The enum's declaration order lives in Postgres (open, resolved, closed), not in
+  // JS, and differs from alphabetical order, so only the real DB can prove it.
+  test("sorts by status in workflow order, not alphabetically", async () => {
+    const run = uid();
+    const withStatus = async (status: TicketStatusValue) => {
+      const { id } = await newTicket(`${run} ${status}`);
+      await db.ticket.update({ where: { id }, data: { status } });
+      return id;
+    };
+    const resolved = await withStatus(TicketStatus.resolved);
+    const closed = await withStatus(TicketStatus.closed);
+    const open = await withStatus(TicketStatus.open);
+    const cookie = await agentCookie();
+    const ours = (order: SortOrderValue) =>
+      walkSorted(cookie, TicketSortField.status, order, (t) => t.subject.includes(run)).then((ts) =>
+        ts.map((t) => t.id),
+      );
+
+    expect(await ours(SortOrder.asc)).toEqual([open, resolved, closed]);
+    expect(await ours(SortOrder.desc)).toEqual([closed, resolved, open]);
+  });
+
+  // One bad value shows the route answers with the schema's message; the rules
+  // are unit-tested in core/src/schemas/tickets.test.ts.
+  test("rejects ?sort=bogus with 400 and the schema message", async () => {
+    const res = await listTickets(await agentCookie(), "?sort=bogus");
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({
+      error: "sort must be one of: id, subject, customer, status, createdAt",
     });
   });
 

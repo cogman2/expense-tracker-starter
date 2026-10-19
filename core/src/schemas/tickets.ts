@@ -1,4 +1,10 @@
 import { z } from "zod";
+import {
+  SORT_ORDERS,
+  SortOrder,
+  TICKET_SORT_FIELDS,
+  TicketSortField,
+} from "../constants/tickets";
 
 /** The subject a ticket gets when the email arrives without one. */
 export const NO_SUBJECT = "(no subject)";
@@ -82,9 +88,13 @@ const MAX_TICKETS_PAGE = 100_000;
 
 const PAGE_MESSAGE = "page must be a whole number of 1 or more";
 
+const SORT_MESSAGE = `sort must be one of: ${TICKET_SORT_FIELDS.join(", ")}`;
+const ORDER_MESSAGE = `order must be ${SORT_ORDERS.join(" or ")}`;
+
 /**
  * The GET /api/tickets query string. Query values arrive as strings, so `page`
- * is coerced; a missing one means the first page.
+ * is coerced; a missing one means the first page. A missing sort means newest
+ * first — the list's order before sorting existed.
  */
 export const ticketListQuerySchema = z.object({
   page: z.coerce
@@ -93,6 +103,10 @@ export const ticketListQuerySchema = z.object({
     .min(1, PAGE_MESSAGE)
     .max(MAX_TICKETS_PAGE, "page is too large")
     .default(1),
+  sort: z
+    .enum(TICKET_SORT_FIELDS, { error: SORT_MESSAGE })
+    .default(TicketSortField.createdAt),
+  order: z.enum(SORT_ORDERS, { error: ORDER_MESSAGE }).default(SortOrder.desc),
 });
 
 export type TicketListQuery = z.infer<typeof ticketListQuerySchema>;

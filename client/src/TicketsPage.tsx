@@ -1,6 +1,23 @@
 import type { ReactNode } from "react";
 import { useSearchParams } from "react-router";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import {
+  createColumnHelper,
+  rowSortingFeature,
+  tableFeatures,
+  useTable,
+  type SortingState,
+} from "@tanstack/react-table";
+import { ArrowDown, ArrowUp, ArrowUpDown } from "lucide-react";
+import {
+  SORT_ORDERS,
+  SortOrder,
+  TICKET_SORT_FIELDS,
+  TicketSortField,
+  type SortOrderValue,
+  type TicketListQuery,
+  type TicketSortFieldValue,
+} from "core";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { getTickets, type TicketRow } from "@/lib/api";
@@ -8,21 +25,68 @@ import { queryKeys } from "@/lib/queryKeys";
 
 const SKELETON_ROWS = 5;
 
-// Fixed column widths for the same reason as the users table
-// (client/src/UsersPage.tsx): the skeleton and the loaded rows share one layout,
-// so nothing jumps when the data lands. `bar` is the placeholder width.
-const COLUMNS = [
-  { label: "Ticket #", width: "w-[10%]", bar: "w-10" },
-  { label: "Subject", width: "w-[38%]", bar: "w-48" },
-  { label: "Customer", width: "w-[24%]", bar: "w-32" },
-  { label: "Status", width: "w-[12%]", bar: "w-14" },
-  { label: "Created", width: "w-[16%]", bar: "w-20" },
-] as const;
+// The table only renders and tracks which header is sorted; the server does the
+// sorting itself (manualSorting below), since it is the only side that sees
+// every page. `columnMeta` types the layout data each column carries.
+const features = tableFeatures({
+  rowSortingFeature,
+  columnMeta: {} as { width: string; bar: string },
+});
+
+const column = createColumnHelper<typeof features, TicketRow>();
 
 const formatCreated = (iso: string) => new Date(iso).toLocaleDateString();
 
+/** A customer who never gave a name is shown by address. */
+const customerLabel = (ticket: TicketRow) =>
+  ticket.customer.name || ticket.customer.email;
+
+// Column ids are the server's sort fields, so a header's sort state is exactly
+// what goes in ?sort=. Fixed widths for the same reason as the users table
+// (client/src/UsersPage.tsx): the skeleton and the loaded rows share one layout,
+// so nothing jumps when the data lands. `bar` is the placeholder width.
+// Numbers and dates sort descending on first click (newest / highest first);
+// text sorts A→Z.
+const COLUMNS = column.columns([
+  column.accessor("id", {
+    id: TicketSortField.id,
+    header: "Ticket #",
+    cell: (info) => `#${info.getValue()}`,
+    sortDescFirst: true,
+    meta: { width: "w-[10%]", bar: "w-10" },
+  }),
+  column.accessor("subject", {
+    id: TicketSortField.subject,
+    header: "Subject",
+    sortDescFirst: false,
+    meta: { width: "w-[38%]", bar: "w-48" },
+  }),
+  column.accessor(customerLabel, {
+    id: TicketSortField.customer,
+    header: "Customer",
+    sortDescFirst: false,
+    meta: { width: "w-[24%]", bar: "w-32" },
+  }),
+  column.accessor("status", {
+    id: TicketSortField.status,
+    header: "Status",
+    sortDescFirst: false,
+    meta: { width: "w-[12%]", bar: "w-14" },
+  }),
+  column.accessor("createdAt", {
+    id: TicketSortField.createdAt,
+    header: "Created",
+    cell: (info) => formatCreated(info.getValue()),
+    sortDescFirst: true,
+    meta: { width: "w-[16%]", bar: "w-20" },
+  }),
+]);
+
 const cellPadding = (index: number) =>
   index === COLUMNS.length - 1 ? "py-2 break-words" : "py-2 pr-4 break-words";
+
+const DEFAULT_SORT = TicketSortField.createdAt;
+const DEFAULT_ORDER = SortOrder.desc;
 
 /** The page in the URL, or 1 when it is missing or not a whole number of 1 or more. */
 function pageFrom(params: URLSearchParams): number {
@@ -30,27 +94,85 @@ function pageFrom(params: URLSearchParams): number {
   return Number.isInteger(page) && page >= 1 ? page : 1;
 }
 
-/** A customer who never gave a name is shown by address. */
-const customerLabel = (ticket: TicketRow) =>
-  ticket.customer.name || ticket.customer.email;
+/** The sort in the URL, or newest first when it is missing or unknown. */
+function sortFrom(params: URLSearchParams): Pick<TicketListQuery, "sort" | "order"> {
+  const sort = params.get("sort");
+  const order = params.get("order");
+  return {
+    sort: TICKET_SORT_FIELDS.find((field) => field === sort) ?? DEFAULT_SORT,
+    order: SORT_ORDERS.find((value) => value === order) ?? DEFAULT_ORDER,
+  };
+}
 
-function TicketsTableFrame({ children }: { children: ReactNode }) {
+/**
+ * The URL for a query. Defaults stay out of it, as `page=1` always has, so the
+ * plain /tickets link is the newest-first first page.
+ */
+function searchFor({ page, sort, order }: TicketListQuery): Record<string, string> {
+  const search: Record<string, string> = {};
+  if (page !== 1) search.page = String(page);
+  if (sort !== DEFAULT_SORT || order !== DEFAULT_ORDER) {
+    search.sort = sort;
+    search.order = order;
+  }
+  return search;
+}
+
+const ariaSort = (sorted: false | SortOrderValue) =>
+  sorted === SortOrder.asc ? "ascending" : sorted === SortOrder.desc ? "descending" : "none";
+
+function SortIcon({ sorted }: { sorted: false | SortOrderValue }) {
+  const Icon =
+    sorted === SortOrder.asc ? ArrowUp : sorted === SortOrder.desc ? ArrowDown : ArrowUpDown;
+  return (
+    <Icon
+      aria-hidden="true"
+      className={`size-3.5 shrink-0 ${sorted ? "text-gray-900" : "text-gray-400"}`}
+    />
+  );
+}
+
+type TicketsTable = ReturnType<typeof useTicketsTable>;
+
+function TicketsTableFrame({
+  table,
+  children,
+}: {
+  table: TicketsTable;
+  children: ReactNode;
+}) {
   return (
     <div className="max-w-4xl overflow-x-auto">
       <table className="w-full table-fixed border-collapse text-left text-sm">
         <colgroup>
-          {COLUMNS.map((column) => (
-            <col key={column.label} className={column.width} />
+          {table.getAllLeafColumns().map((col) => (
+            <col key={col.id} className={col.columnDef.meta?.width} />
           ))}
         </colgroup>
         <thead>
-          <tr className="border-b border-gray-200 text-gray-500">
-            {COLUMNS.map((column, index) => (
-              <th key={column.label} className={`${cellPadding(index)} font-medium`}>
-                {column.label}
-              </th>
-            ))}
-          </tr>
+          {table.getHeaderGroups().map((group) => (
+            <tr key={group.id} className="border-b border-gray-200 text-gray-500">
+              {group.headers.map((header, index) => {
+                const sorted = header.column.getIsSorted();
+                return (
+                  <th
+                    key={header.id}
+                    aria-sort={ariaSort(sorted)}
+                    className={`${cellPadding(index)} font-medium`}
+                  >
+                    <button
+                      type="button"
+                      className="inline-flex cursor-pointer items-center gap-1 hover:text-gray-900"
+                      onClick={header.column.getToggleSortingHandler()}
+                    >
+                      <table.FlexRender header={header} />
+                      <SortIcon sorted={sorted} />
+                    </button>
+                  </th>
+                );
+              })}
+            </tr>
+          ))}
         </thead>
         {children}
       </table>
@@ -58,15 +180,15 @@ function TicketsTableFrame({ children }: { children: ReactNode }) {
   );
 }
 
-function TicketsTableSkeleton() {
+function TicketsTableSkeleton({ table }: { table: TicketsTable }) {
   return (
-    <TicketsTableFrame>
+    <TicketsTableFrame table={table}>
       <tbody>
         {Array.from({ length: SKELETON_ROWS }, (_, row) => (
           <tr key={row} className="border-b border-gray-100">
-            {COLUMNS.map((column, index) => (
-              <td key={column.label} className={cellPadding(index)}>
-                <Skeleton className={`h-4 ${column.bar}`} />
+            {table.getAllLeafColumns().map((col, index) => (
+              <td key={col.id} className={cellPadding(index)}>
+                <Skeleton className={`h-4 ${col.columnDef.meta?.bar}`} />
               </td>
             ))}
           </tr>
@@ -76,23 +198,58 @@ function TicketsTableSkeleton() {
   );
 }
 
+/**
+ * The table instance, its sort state owned by the URL: the table reads
+ * `sorting` from `query` and reports header clicks to `onSort`. One column at a
+ * time, toggling between directions — there is no unsorted state, since the
+ * server always applies some order.
+ */
+function useTicketsTable(
+  tickets: TicketRow[],
+  { sort, order }: Pick<TicketListQuery, "sort" | "order">,
+  onSort: (sort: TicketSortFieldValue, order: SortOrderValue) => void,
+) {
+  const sorting: SortingState = [{ id: sort, desc: order === SortOrder.desc }];
+  return useTable({
+    features,
+    columns: COLUMNS,
+    data: tickets,
+    getRowId: (ticket) => String(ticket.id),
+    manualSorting: true,
+    enableMultiSort: false,
+    enableSortingRemoval: false,
+    state: { sorting },
+    onSortingChange: (updater) => {
+      const [next] = typeof updater === "function" ? updater(sorting) : updater;
+      const field = TICKET_SORT_FIELDS.find((f) => f === next?.id);
+      if (next && field) onSort(field, next.desc ? SortOrder.desc : SortOrder.asc);
+    },
+  });
+}
+
 export function TicketsPage() {
-  // The page lives in the URL, so a reload or Back keeps the reader's place.
+  // The page and sort live in the URL, so a reload or Back keeps the reader's
+  // place and order.
   const [searchParams, setSearchParams] = useSearchParams();
   const page = pageFrom(searchParams);
+  const query: TicketListQuery = { page, ...sortFrom(searchParams) };
 
   // keepPreviousData holds the current page on screen while the next one loads,
   // instead of dropping back to the skeleton on every click.
   const { data, isPending, isError, isPlaceholderData } = useQuery({
-    queryKey: queryKeys.tickets.list({ page }),
-    queryFn: ({ signal }) => getTickets(page, signal),
+    queryKey: queryKeys.tickets.list(query),
+    queryFn: ({ signal }) => getTickets(query, signal),
     placeholderData: keepPreviousData,
   });
 
-  const goTo = (next: number) =>
-    setSearchParams(next === 1 ? {} : { page: String(next) });
+  const goTo = (next: number) => setSearchParams(searchFor({ ...query, page: next }));
+  // A new order starts over at the first page: page 3 of a different order is
+  // a different set of tickets.
+  const sortBy = (sort: TicketSortFieldValue, order: SortOrderValue) =>
+    setSearchParams(searchFor({ page: 1, sort, order }));
 
   const tickets = data?.tickets ?? [];
+  const table = useTicketsTable(tickets, query, sortBy);
   const totalPages = data ? Math.max(1, Math.ceil(data.total / data.pageSize)) : 1;
   const first = data ? (data.page - 1) * data.pageSize + 1 : 0;
   const last = data ? first + tickets.length - 1 : 0;
@@ -103,7 +260,7 @@ export function TicketsPage() {
 
       <section className="mt-6" aria-busy={isPending || isPlaceholderData}>
         {isError && <p className="text-sm text-red-600">Could not load tickets.</p>}
-        {!isError && isPending && <TicketsTableSkeleton />}
+        {!isError && isPending && <TicketsTableSkeleton table={table} />}
         {!isError && data && data.total === 0 && (
           <p className="text-sm text-gray-500">No tickets yet.</p>
         )}
@@ -122,17 +279,15 @@ export function TicketsPage() {
         )}
         {!isError && tickets.length > 0 && (
           <>
-            <TicketsTableFrame>
+            <TicketsTableFrame table={table}>
               <tbody>
-                {tickets.map((ticket) => (
-                  <tr key={ticket.id} className="border-b border-gray-100">
-                    <td className={cellPadding(0)}>#{ticket.id}</td>
-                    <td className={cellPadding(1)}>{ticket.subject}</td>
-                    <td className={cellPadding(2)}>{customerLabel(ticket)}</td>
-                    <td className={cellPadding(3)}>{ticket.status}</td>
-                    <td className={cellPadding(4)}>
-                      {formatCreated(ticket.createdAt)}
-                    </td>
+                {table.getRowModel().rows.map((row) => (
+                  <tr key={row.id} className="border-b border-gray-100">
+                    {row.getAllCells().map((cell, index) => (
+                      <td key={cell.id} className={cellPadding(index)}>
+                        <table.FlexRender cell={cell} />
+                      </td>
+                    ))}
                   </tr>
                 ))}
               </tbody>

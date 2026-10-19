@@ -1,4 +1,4 @@
-import type { UserRole } from "core";
+import type { TicketListQuery, UserRole } from "core";
 
 // Central query-key factory. Keys are hierarchical so a broad invalidation
 // covers every narrower variant beneath it: invalidating `users.all` also
@@ -13,10 +13,11 @@ export interface UserFilters {
   search?: string;
 }
 
-/** Which slice of the ticket list. Filters join `page` here later. */
-export interface TicketFilters {
-  page: number;
-}
+/**
+ * Which slice of the ticket list: the page and its server-side sort, so each
+ * ordering caches separately. Filters join here later.
+ */
+export type TicketFilters = TicketListQuery;
 
 export const queryKeys = {
   health: ["health"] as const,

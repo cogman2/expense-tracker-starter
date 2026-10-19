@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { cleanup, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useLocation } from "react-router";
-import { TicketStatus } from "core";
+import { SortOrder, TicketSortField, TicketStatus } from "core";
 import { renderWithQuery } from "./testRender";
 import { fakeHttp, httpCalls, restoreHttp, type FakeResponse } from "./testHttp";
 import { TicketsPage } from "./TicketsPage";
@@ -25,6 +25,8 @@ const pageOf = (tickets: TicketRow[], page: number, total: number): TicketPage =
   total,
   page,
   pageSize: 25,
+  sort: TicketSortField.createdAt,
+  order: SortOrder.desc,
 });
 
 /** Answers each GET with whatever `respond` returns for the requested page. */
@@ -59,6 +61,17 @@ function renderAt(url = "/tickets") {
 
 const requestedPages = () =>
   httpCalls().map((call) => [call.url, call.params?.page]);
+
+/** Each request's page and sort, in order: what the server was asked for. */
+const requestedQueries = () =>
+  httpCalls().map((call) => ({
+    page: call.params?.page,
+    sort: call.params?.sort,
+    order: call.params?.order,
+  }));
+
+const header = (name: string) => screen.getByRole("columnheader", { name });
+const sortButton = (name: string) => screen.getByRole("button", { name });
 
 describe("TicketsPage", () => {
   test("shows each ticket's number, subject, customer, status and date", async () => {
@@ -172,5 +185,257 @@ describe("TicketsPage", () => {
     await screen.findByText(/No tickets on this page/);
     await user.click(screen.getByRole("button", { name: "Go to the first page" }));
     expect(await screen.findByRole("cell", { name: "#3" })).toBeTruthy();
+  });
+});
+
+// The server sorts; these specs check what the page asks it for, what it writes
+// to the URL, and how the headers report the current order. The fake answers
+// every sort with the same rows — ordering itself is the server's job, covered
+// by server/src/ticket-sort.test.ts and e2e/tickets-list.spec.ts.
+describe("TicketsPage sorting", () => {
+  const onePage = () => ({ status: 200, data: pageOf([ticket(1)], 1, 1) });
+
+  test("asks for newest first by default and marks Created as sorted", async () => {
+    respond = onePage;
+    renderAt();
+
+    await screen.findByRole("cell", { name: "#1" });
+    expect(requestedQueries()).toEqual([
+      { page: 1, sort: TicketSortField.createdAt, order: SortOrder.desc },
+    ]);
+    expect(header("Created")).toHaveAttribute("aria-sort", "descending");
+    for (const name of ["Ticket #", "Subject", "Customer", "Status"]) {
+      expect(header(name)).toHaveAttribute("aria-sort", "none");
+    }
+    expect(locationSearch()).toBe("");
+  });
+
+  test("clicking a text header sorts A→Z, and clicking again reverses it", async () => {
+    respond = onePage;
+    const user = userEvent.setup();
+    renderAt();
+    await screen.findByRole("cell", { name: "#1" });
+
+    await user.click(sortButton("Subject"));
+    expect(locationSearch()).toBe("?sort=subject&order=asc");
+    expect(header("Subject")).toHaveAttribute("aria-sort", "ascending");
+    expect(header("Created")).toHaveAttribute("aria-sort", "none");
+
+    await user.click(sortButton("Subject"));
+    expect(locationSearch()).toBe("?sort=subject&order=desc");
+    expect(header("Subject")).toHaveAttribute("aria-sort", "descending");
+
+    await screen.findByRole("cell", { name: "#1" });
+    expect(requestedQueries().map(({ sort, order }) => [sort, order])).toEqual([
+      [TicketSortField.createdAt, SortOrder.desc],
+      [TicketSortField.subject, SortOrder.asc],
+      [TicketSortField.subject, SortOrder.desc],
+    ]);
+  });
+
+  test("clicking the ticket number sorts highest first", async () => {
+    respond = onePage;
+    const user = userEvent.setup();
+    renderAt();
+    await screen.findByRole("cell", { name: "#1" });
+
+    await user.click(sortButton("Ticket #"));
+    expect(locationSearch()).toBe("?sort=id&order=desc");
+    expect(requestedQueries().at(-1)).toEqual({
+      page: 1,
+      sort: TicketSortField.id,
+      order: SortOrder.desc,
+    });
+  });
+
+  test("going back to the default order drops the sort from the URL", async () => {
+    respond = onePage;
+    const user = userEvent.setup();
+    renderAt("/tickets?sort=status&order=asc");
+    await screen.findByRole("cell", { name: "#1" });
+
+    await user.click(sortButton("Created"));
+    expect(locationSearch()).toBe("");
+  });
+
+  test("changing the sort returns to the first page", async () => {
+    respond = (page) => ({ status: 200, data: pageOf([ticket(page)], page, 60) });
+    const user = userEvent.setup();
+    renderAt("/tickets?page=2");
+    await screen.findByRole("cell", { name: "#2" });
+
+    await user.click(sortButton("Customer"));
+    expect(locationSearch()).toBe("?sort=customer&order=asc");
+    await screen.findByRole("cell", { name: "#1" });
+    expect(requestedQueries().at(-1)).toEqual({
+      page: 1,
+      sort: TicketSortField.customer,
+      order: SortOrder.asc,
+    });
+  });
+
+  test("opens with the sort named in the URL", async () => {
+    respond = onePage;
+    renderAt("/tickets?sort=status&order=asc");
+
+    await screen.findByRole("cell", { name: "#1" });
+    expect(requestedQueries()).toEqual([
+      { page: 1, sort: TicketSortField.status, order: SortOrder.asc },
+    ]);
+    expect(header("Status")).toHaveAttribute("aria-sort", "ascending");
+    expect(header("Created")).toHaveAttribute("aria-sort", "none");
+  });
+
+  test("treats an unknown sort or order in the URL as the default", async () => {
+    respond = onePage;
+    renderAt("/tickets?sort=bogus&order=sideways");
+
+    await screen.findByRole("cell", { name: "#1" });
+    expect(requestedQueries()).toEqual([
+      { page: 1, sort: TicketSortField.createdAt, order: SortOrder.desc },
+    ]);
+    expect(header("Created")).toHaveAttribute("aria-sort", "descending");
+  });
+
+  test("Next and Previous keep the sort", async () => {
+    respond = (page) =>
+      page === 2
+        ? { status: 200, data: pageOf([ticket(26)], 2, 26) }
+        : { status: 200, data: pageOf(Array.from({ length: 25 }, (_, i) => ticket(i + 1)), 1, 26) };
+    const user = userEvent.setup();
+    renderAt("/tickets?sort=subject&order=asc");
+    await screen.findByRole("cell", { name: "#1" });
+
+    await user.click(screen.getByRole("button", { name: "Next" }));
+    await screen.findByRole("cell", { name: "#26" });
+    expect(locationSearch()).toBe("?page=2&sort=subject&order=asc");
+
+    await user.click(screen.getByRole("button", { name: "Previous" }));
+    await screen.findByRole("cell", { name: "#1" });
+    expect(locationSearch()).toBe("?sort=subject&order=asc");
+    expect(requestedQueries()).toEqual([
+      { page: 1, sort: TicketSortField.subject, order: SortOrder.asc },
+      { page: 2, sort: TicketSortField.subject, order: SortOrder.asc },
+      { page: 1, sort: TicketSortField.subject, order: SortOrder.asc },
+    ]);
+  });
+});
+
+describe("TicketsPage sorting — first clicks, loading and edge cases", () => {
+  const onePage = () => ({ status: 200, data: pageOf([ticket(1)], 1, 1) });
+
+  test("every column header is a sort button", async () => {
+    respond = onePage;
+    renderAt();
+    await screen.findByRole("cell", { name: "#1" });
+
+    const headers = screen.getAllByRole("columnheader");
+    expect(headers.map((h) => h.textContent)).toEqual([
+      "Ticket #",
+      "Subject",
+      "Customer",
+      "Status",
+      "Created",
+    ]);
+    for (const h of headers) {
+      expect(within(h).getByRole("button")).toBeTruthy();
+    }
+  });
+
+  test("Customer and Status sort A→Z on their first click", async () => {
+    respond = onePage;
+    const user = userEvent.setup();
+    renderAt();
+    await screen.findByRole("cell", { name: "#1" });
+
+    await user.click(sortButton("Customer"));
+    expect(locationSearch()).toBe("?sort=customer&order=asc");
+    expect(header("Customer")).toHaveAttribute("aria-sort", "ascending");
+
+    await user.click(sortButton("Status"));
+    expect(locationSearch()).toBe("?sort=status&order=asc");
+    expect(header("Status")).toHaveAttribute("aria-sort", "ascending");
+    expect(header("Customer")).toHaveAttribute("aria-sort", "none");
+  });
+
+  test("clicking the already-sorted Created header flips to oldest first", async () => {
+    respond = onePage;
+    const user = userEvent.setup();
+    renderAt();
+    await screen.findByRole("cell", { name: "#1" });
+
+    await user.click(sortButton("Created"));
+    expect(locationSearch()).toBe("?sort=createdAt&order=asc");
+    expect(header("Created")).toHaveAttribute("aria-sort", "ascending");
+    await screen.findByRole("cell", { name: "#1" });
+    expect(requestedQueries().at(-1)).toEqual({
+      page: 1,
+      sort: TicketSortField.createdAt,
+      order: SortOrder.asc,
+    });
+  });
+
+  test("the loading skeleton already shows the requested sort", async () => {
+    respond = () => ({ status: 200, pending: true });
+    renderAt("/tickets?sort=subject&order=desc");
+
+    expect(await screen.findByRole("columnheader", { name: "Subject" })).toHaveAttribute(
+      "aria-sort",
+      "descending",
+    );
+    expect(header("Created")).toHaveAttribute("aria-sort", "none");
+    expect(screen.queryByRole("cell", { name: "#1" })).toBeNull();
+  });
+
+  test("keeps the current rows on screen while a new order loads", async () => {
+    fakeHttp((config) =>
+      config.params?.sort === TicketSortField.subject
+        ? { status: 200, pending: true }
+        : onePage(),
+    );
+    const user = userEvent.setup();
+    const { container } = renderAt();
+    await screen.findByRole("cell", { name: "#1" });
+
+    await user.click(sortButton("Subject"));
+    // The header reflects the click at once; the old rows stay until the new
+    // order arrives, rather than flashing back to the skeleton.
+    expect(header("Subject")).toHaveAttribute("aria-sort", "ascending");
+    expect(screen.getByRole("cell", { name: "#1" })).toBeTruthy();
+    expect(container.querySelector("section")).toHaveAttribute("aria-busy", "true");
+    expect(screen.getByRole("button", { name: "Next" })).toBeDisabled();
+  });
+
+  test("the first-page link from past the end keeps the sort", async () => {
+    respond = (page) =>
+      page === 9
+        ? { status: 200, data: pageOf([], 9, 3) }
+        : { status: 200, data: pageOf([ticket(3)], 1, 3) };
+    const user = userEvent.setup();
+    renderAt("/tickets?page=9&sort=status&order=asc");
+
+    await screen.findByText(/No tickets on this page/);
+    await user.click(screen.getByRole("button", { name: "Go to the first page" }));
+    await screen.findByRole("cell", { name: "#3" });
+    expect(locationSearch()).toBe("?sort=status&order=asc");
+    expect(requestedQueries().at(-1)).toEqual({
+      page: 1,
+      sort: TicketSortField.status,
+      order: SortOrder.asc,
+    });
+  });
+
+  test("shows the error when a sorted request fails", async () => {
+    fakeHttp((config) =>
+      config.params?.sort === TicketSortField.customer
+        ? { status: 500, data: { error: "internal server error" } }
+        : onePage(),
+    );
+    const user = userEvent.setup();
+    renderAt();
+    await screen.findByRole("cell", { name: "#1" });
+
+    await user.click(sortButton("Customer"));
+    expect(await screen.findByText("Could not load tickets.")).toBeTruthy();
   });
 });

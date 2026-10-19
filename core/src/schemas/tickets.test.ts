@@ -1,4 +1,10 @@
 import { describe, expect, test } from "bun:test";
+import {
+  SORT_ORDERS,
+  SortOrder,
+  TICKET_SORT_FIELDS,
+  TicketSortField,
+} from "../constants/tickets";
 import { inboundEmailSchema, NO_SUBJECT, ticketListQuerySchema } from "./tickets";
 
 const valid = {
@@ -89,12 +95,58 @@ describe("inboundEmailSchema", () => {
 });
 
 describe("ticketListQuerySchema", () => {
-  test("a missing page means the first page", () => {
-    expect(ticketListQuerySchema.parse({})).toEqual({ page: 1 });
+  test("a missing page and sort mean the first page, newest first", () => {
+    expect(ticketListQuerySchema.parse({})).toEqual({
+      page: 1,
+      sort: TicketSortField.createdAt,
+      order: SortOrder.desc,
+    });
   });
 
   test("coerces the query-string value to a number", () => {
-    expect(ticketListQuerySchema.parse({ page: "2" })).toEqual({ page: 2 });
+    expect(ticketListQuerySchema.parse({ page: "2" }).page).toBe(2);
+  });
+
+  test("accepts every sort field in either order", () => {
+    for (const sort of TICKET_SORT_FIELDS) {
+      for (const order of SORT_ORDERS) {
+        expect(ticketListQuerySchema.parse({ sort, order })).toEqual({
+          page: 1,
+          sort,
+          order,
+        });
+      }
+    }
+  });
+
+  test("rejects an unknown sort field", () => {
+    for (const sort of ["bogus", "", "createdat", "customer.name"]) {
+      const parsed = ticketListQuerySchema.safeParse({ sort });
+      expect(parsed.error?.issues[0]?.message).toBe(
+        "sort must be one of: id, subject, customer, status, createdAt",
+      );
+    }
+  });
+
+  test("rejects an unknown order", () => {
+    for (const order of ["ASC", "up", ""]) {
+      const parsed = ticketListQuerySchema.safeParse({ order });
+      expect(parsed.error?.issues[0]?.message).toBe("order must be asc or desc");
+    }
+  });
+
+  test("reports the sort before the order when both are invalid", () => {
+    const parsed = ticketListQuerySchema.safeParse({ sort: "bogus", order: "up" });
+    expect(parsed.error?.issues[0]?.message).toBe(
+      "sort must be one of: id, subject, customer, status, createdAt",
+    );
+  });
+
+  test("reports the page before the sort when both are invalid", () => {
+    const parsed = ticketListQuerySchema.safeParse({ page: "0", sort: "bogus" });
+    expect(parsed.error?.issues[0]?.message).toBe(
+      "page must be a whole number of 1 or more",
+    );
   });
 
   test("rejects a page that is not a whole number of 1 or more", () => {
