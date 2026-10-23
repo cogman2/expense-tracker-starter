@@ -46,9 +46,14 @@ export const inboundEmailSchema = z.object({
   from: z.object(
     {
       email: emailField("a valid from.email is required"),
+      // A blank or whitespace-only name is no name: it becomes undefined, so it
+      // is stored as NULL. Kept as "", it would sort as a real (empty) name —
+      // ahead of everyone under ?sort=customer — while the list shows the
+      // customer's email, and it would dodge the "unnamed last" ordering.
       name: z
         .string({ error: "from.name must be a string" })
         .trim()
+        .transform((name) => name || undefined)
         .optional(),
     },
     { error: "a valid from.email is required" },

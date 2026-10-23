@@ -54,6 +54,20 @@ describe("inboundEmailSchema", () => {
     ]);
   });
 
+  test("a blank or whitespace-only sender name is no name", () => {
+    for (const name of ["", "   ", "\t\n "]) {
+      const parsed = inboundEmailSchema.parse({ ...valid, from: { ...valid.from, name } });
+      expect(parsed.from.name).toBeUndefined();
+    }
+    const { name: _omitted, ...nameless } = valid.from;
+    expect(inboundEmailSchema.parse({ ...valid, from: nameless }).from.name).toBeUndefined();
+  });
+
+  test("a real name keeps its inner spacing once trimmed", () => {
+    const parsed = inboundEmailSchema.parse({ ...valid, from: { ...valid.from, name: "  Mary  Ann  " } });
+    expect(parsed.from.name).toBe("Mary  Ann");
+  });
+
   test("a missing or blank subject falls back to a placeholder", () => {
     const { subject: _omitted, ...withoutSubject } = valid;
     expect(inboundEmailSchema.parse(withoutSubject).subject).toBe(NO_SUBJECT);
