@@ -28,16 +28,10 @@ describe("TICKET_FILTERS", () => {
     }
   });
 
-  // A compile-time check: the @ts-expect-error line fails `bun run typecheck`
-  // if defineFilter ever stops rejecting a value that has no label.
+  // A compile-time check: the expected-error line fails `bun run typecheck` if
+  // defineFilter ever stops rejecting a value that has no label. (That a
+  // complete call compiles is proven by the registry's own category entry.)
   test("defineFilter needs a label for every value it accepts", () => {
-    const complete = defineFilter({
-      label: "Example",
-      values: ["a", "b"],
-      optionLabels: { a: "A", b: "B" },
-    });
-    expect(complete.optionLabels.b).toBe("B");
-
     const labelsMissingB = { a: "A" };
     // @ts-expect-error — "b" is accepted but has no label.
     defineFilter({ label: "Example", values: ["a", "b"], optionLabels: labelsMissingB });

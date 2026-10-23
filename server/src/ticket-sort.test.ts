@@ -3,14 +3,11 @@ import { SORT_ORDERS, SortOrder, TICKET_SORT_FIELDS, TicketSortField } from "cor
 import { ticketOrderBy } from "./ticket-sort";
 
 describe("ticketOrderBy", () => {
-  test("the default sort is newest first, id breaking ties", () => {
+  test("plain columns sort by that column, then id the same way", () => {
     expect(ticketOrderBy(TicketSortField.createdAt, SortOrder.desc)).toEqual([
       { createdAt: "desc" },
       { id: "desc" },
     ]);
-  });
-
-  test("plain columns sort by that column, then id the same way", () => {
     expect(ticketOrderBy(TicketSortField.subject, SortOrder.asc)).toEqual([
       { subject: "asc" },
       { id: "asc" },

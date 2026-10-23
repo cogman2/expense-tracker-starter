@@ -30,15 +30,10 @@ describe("ticketWhere", () => {
 
 // Compile-time checks of the guard that keeps ticketWhere's cast safe. Each
 // expected-error line below fails `bun run typecheck` if ColumnAccepts ever
-// starts accepting what it should reject. Assigning `true` only type-checks
-// where the result is `true`.
+// starts accepting what it should reject (assigning `true` only type-checks
+// where the result is `true`). That it accepts a real filter column is proven
+// by TicketFiltersMatchColumns itself, in ticket-filters.ts.
 describe("ColumnAccepts", () => {
-  test("accepts a Ticket column with values it can hold", () => {
-    const category: ColumnAccepts<"category", typeof TicketCategory.refund_request> = true;
-    const status: ColumnAccepts<"status", "open" | "closed"> = true;
-    expect([category, status]).toEqual([true, true]);
-  });
-
   test("rejects a non-column, a relation, and values the column can't hold", () => {
     // @ts-expect-error — not a Ticket column.
     const notAColumn: ColumnAccepts<"notAColumn", "x"> = true;
