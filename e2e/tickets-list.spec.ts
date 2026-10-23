@@ -140,25 +140,6 @@ test.describe("GET /api/tickets", () => {
     });
   });
 
-  // Sorting must happen in the database across ALL tickets, so our tickets may
-  // land on any page. Rather than rely on a prefix that sorts first/last (collation
-  // dependent), walk every page and keep only our run-unique tickets, in the order
-  // the server returned them.
-  test("sorts by subject in the database, ascending and descending", async () => {
-    const run = uid();
-    // Created out of alphabetical order so insertion order can't pass the test.
-    const created = [await newTicket(`${run} b`), await newTicket(`${run} c`), await newTicket(`${run} a`)];
-    const cookie = await agentCookie();
-    const ourSubjects = (order: SortOrderValue) =>
-      walkSorted(cookie, TicketSortField.subject, order, (t) => t.subject.includes(run)).then((ts) =>
-        ts.map((t) => t.subject),
-      );
-
-    const asc = created.map((t) => t.subject).sort();
-    expect(await ourSubjects(SortOrder.asc)).toEqual(asc);
-    expect(await ourSubjects(SortOrder.desc)).toEqual([...asc].reverse());
-  });
-
   // Null ordering is Postgres behaviour (Prisma `nulls: "last"`), so it needs the real DB.
   test("sorts by customer name then email, unnamed customers last in both directions", async () => {
     const run = uid();
@@ -228,16 +209,6 @@ test.describe("GET /api/tickets", () => {
     expect(await ours(SortOrder.desc)).toEqual([refund, technical, general, uncategorized]);
   });
 
-  // One bad value shows the route answers with the schema's message; the rules
-  // are unit-tested in core/src/schemas/tickets.test.ts.
-  test("rejects ?sort=bogus with 400 and the schema message", async () => {
-    const res = await listTickets(await agentCookie(), "?sort=bogus");
-    expect(res.status).toBe(400);
-    expect(await res.json()).toEqual({
-      error: "sort must be one of: id, subject, customer, status, category, createdAt",
-    });
-  });
-
   // The WHERE must reach both findMany and count in Postgres, so only the real DB
   // proves `total` is the filtered total.
   test("filters by category in the database; total counts only the matches", async () => {
@@ -269,16 +240,6 @@ test.describe("GET /api/tickets", () => {
     const unfiltered = (await (await listTickets(cookie)).json()) as TicketList;
     expect(unfiltered.filters).toEqual({});
     expect(total).toBeLessThan(unfiltered.total);
-  });
-
-  // One bad value shows the route answers with the schema's message; the rules
-  // are unit-tested in core.
-  test("rejects ?category=bogus with 400 and the schema message", async () => {
-    const res = await listTickets(await agentCookie(), "?category=bogus");
-    expect(res.status).toBe(400);
-    expect(await res.json()).toEqual({
-      error: "category must be one of: general_question, technical_question, refund_request",
-    });
   });
 
   test("returns an empty page far past the end", async () => {

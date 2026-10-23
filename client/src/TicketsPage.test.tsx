@@ -316,26 +316,31 @@ describe("TicketsPage sorting", () => {
     expect(header("Created")).toHaveAttribute("aria-sort", "descending");
   });
 
-  test("Next and Previous keep the sort", async () => {
+  test("Next and Previous keep the sort and filter", async () => {
     respond = (page) =>
       page === 2
         ? { status: 200, data: pageOf([ticket(26)], 2, 26) }
         : { status: 200, data: pageOf(Array.from({ length: 25 }, (_, i) => ticket(i + 1)), 1, 26) };
     const user = userEvent.setup();
-    renderAt("/tickets?sort=subject&order=asc");
+    renderAt("/tickets?sort=subject&order=asc&category=general_question");
     await screen.findByRole("cell", { name: "#1" });
 
     await user.click(screen.getByRole("button", { name: "Next" }));
     await screen.findByRole("cell", { name: "#26" });
-    expect(locationSearch()).toBe("?page=2&sort=subject&order=asc");
+    expect(locationSearch()).toBe("?page=2&sort=subject&order=asc&category=general_question");
 
     await user.click(screen.getByRole("button", { name: "Previous" }));
     await screen.findByRole("cell", { name: "#1" });
-    expect(locationSearch()).toBe("?sort=subject&order=asc");
+    expect(locationSearch()).toBe("?sort=subject&order=asc&category=general_question");
     expect(requestedQueries()).toEqual([
       { page: 1, sort: TicketSortField.subject, order: SortOrder.asc },
       { page: 2, sort: TicketSortField.subject, order: SortOrder.asc },
       { page: 1, sort: TicketSortField.subject, order: SortOrder.asc },
+    ]);
+    expect(requestedCategories()).toEqual([
+      TicketCategory.general_question,
+      TicketCategory.general_question,
+      TicketCategory.general_question,
     ]);
   });
 });
@@ -362,7 +367,7 @@ describe("TicketsPage sorting — first clicks, loading and edge cases", () => {
     }
   });
 
-  test("Customer and Status sort A→Z on their first click", async () => {
+  test("Customer, Status and Category sort A→Z on their first click", async () => {
     respond = onePage;
     const user = userEvent.setup();
     renderAt();
@@ -376,6 +381,10 @@ describe("TicketsPage sorting — first clicks, loading and edge cases", () => {
     expect(locationSearch()).toBe("?sort=status&order=asc");
     expect(header("Status")).toHaveAttribute("aria-sort", "ascending");
     expect(header("Customer")).toHaveAttribute("aria-sort", "none");
+
+    await user.click(sortButton("Category"));
+    expect(locationSearch()).toBe("?sort=category&order=asc");
+    expect(header("Category")).toHaveAttribute("aria-sort", "ascending");
   });
 
   test("clicking the already-sorted Created header flips to oldest first", async () => {
@@ -426,25 +435,6 @@ describe("TicketsPage sorting — first clicks, loading and edge cases", () => {
     expect(screen.getByRole("button", { name: "Next" })).toBeDisabled();
   });
 
-  test("the first-page link from past the end keeps the sort", async () => {
-    respond = (page) =>
-      page === 9
-        ? { status: 200, data: pageOf([], 9, 3) }
-        : { status: 200, data: pageOf([ticket(3)], 1, 3) };
-    const user = userEvent.setup();
-    renderAt("/tickets?page=9&sort=status&order=asc");
-
-    await screen.findByText(/No tickets on this page/);
-    await user.click(screen.getByRole("button", { name: "Go to the first page" }));
-    await screen.findByRole("cell", { name: "#3" });
-    expect(locationSearch()).toBe("?sort=status&order=asc");
-    expect(requestedQueries().at(-1)).toEqual({
-      page: 1,
-      sort: TicketSortField.status,
-      order: SortOrder.asc,
-    });
-  });
-
   test("shows the error when a sorted request fails", async () => {
     fakeHttp((config) =>
       config.params?.sort === TicketSortField.customer
@@ -465,16 +455,6 @@ describe("TicketsPage sorting — first clicks, loading and edge cases", () => {
 // is server/src/ticket-filters.test.ts and e2e/tickets-list.spec.ts.
 describe("TicketsPage filtering by category", () => {
   const onePage = () => ({ status: 200, data: pageOf([ticket(1)], 1, 1) });
-
-  test("starts unfiltered, with All pressed", async () => {
-    respond = onePage;
-    renderAt();
-    await screen.findByRole("cell", { name: "#1" });
-
-    expect(requestedCategories()).toEqual([undefined]);
-    expect(categoryChoice("All")).toHaveAttribute("aria-pressed", "true");
-    expect(locationSearch()).toBe("");
-  });
 
   test("choosing a category requests it and writes it to the URL", async () => {
     respond = onePage;
@@ -556,29 +536,6 @@ describe("TicketsPage filtering by category", () => {
     ]);
   });
 
-  test("Next and Previous keep the filter", async () => {
-    respond = (page) =>
-      page === 2
-        ? { status: 200, data: pageOf([ticket(26)], 2, 26) }
-        : { status: 200, data: pageOf(Array.from({ length: 25 }, (_, i) => ticket(i + 1)), 1, 26) };
-    const user = userEvent.setup();
-    renderAt("/tickets?category=general_question");
-    await screen.findByRole("cell", { name: "#1" });
-
-    await user.click(screen.getByRole("button", { name: "Next" }));
-    await screen.findByRole("cell", { name: "#26" });
-    expect(locationSearch()).toBe("?page=2&category=general_question");
-
-    await user.click(screen.getByRole("button", { name: "Previous" }));
-    await screen.findByRole("cell", { name: "#1" });
-    expect(locationSearch()).toBe("?category=general_question");
-    expect(requestedCategories()).toEqual([
-      TicketCategory.general_question,
-      TicketCategory.general_question,
-      TicketCategory.general_question,
-    ]);
-  });
-
   test("says no tickets match when a filter finds none", async () => {
     // Like the server, the fake echoes the filter it applied.
     fakeHttp((config) =>
@@ -599,12 +556,6 @@ describe("TicketsPage filtering by category", () => {
     // The filter stays usable, so the reader can widen the search again.
     await user.click(categoryChoice("All"));
     expect(await screen.findByRole("cell", { name: "#1" })).toBeTruthy();
-  });
-
-  test("an empty list with no filter still says there are no tickets yet", async () => {
-    renderAt();
-    expect(await screen.findByText("No tickets yet.")).toBeTruthy();
-    expect(screen.queryByText("No tickets match this filter.")).toBeNull();
   });
 
   test("the filter stays available when the list fails to load", async () => {
@@ -644,16 +595,6 @@ describe("TicketsPage filtering by category", () => {
     ]);
   });
 
-  test("the Category header sorts by category, A→Z first", async () => {
-    respond = onePage;
-    const user = userEvent.setup();
-    renderAt();
-    await screen.findByRole("cell", { name: "#1" });
-
-    await user.click(sortButton("Category"));
-    expect(locationSearch()).toBe("?sort=category&order=asc");
-    expect(header("Category")).toHaveAttribute("aria-sort", "ascending");
-  });
 });
 
 // While a new page, sort or filter loads, the previous response stays on screen

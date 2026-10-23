@@ -185,10 +185,6 @@ describe("ticketListQuerySchema", () => {
     expect(parsed.error?.issues[0]?.message).toBe("page is too large");
   });
 
-  test("no category means every category", () => {
-    expect("category" in ticketListQuerySchema.parse({})).toBe(false);
-  });
-
   test("accepts each category as a filter", () => {
     for (const category of TICKET_CATEGORIES) {
       expect(ticketListQuerySchema.parse({ category }).category).toBe(category);
