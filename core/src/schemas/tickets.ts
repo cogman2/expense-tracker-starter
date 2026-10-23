@@ -5,6 +5,11 @@ import {
   TICKET_SORT_FIELDS,
   TicketSortField,
 } from "../constants/tickets";
+import {
+  TICKET_FILTER_KEYS,
+  TICKET_FILTERS,
+  type TicketFilterKey,
+} from "../filters/tickets";
 
 /** The subject a ticket gets when the email arrives without one. */
 export const NO_SUBJECT = "(no subject)";
@@ -92,9 +97,32 @@ const SORT_MESSAGE = `sort must be one of: ${TICKET_SORT_FIELDS.join(", ")}`;
 const ORDER_MESSAGE = `order must be ${SORT_ORDERS.join(" or ")}`;
 
 /**
+ * One optional query param per entry in TICKET_FILTERS (../filters/tickets.ts),
+ * so a new filter is validated without touching this file. Missing means "all".
+ */
+function filterParam<K extends TicketFilterKey>(key: K) {
+  const { values } = TICKET_FILTERS[key];
+  return z
+    .enum(values, { error: `${key} must be one of: ${values.join(", ")}` })
+    .optional();
+}
+
+function filterParams() {
+  const params = Object.fromEntries(
+    TICKET_FILTER_KEYS.map((key) => [key, filterParam(key)]),
+  );
+  // Object.fromEntries types its result as a string-keyed record; restate the
+  // exact per-key schemas, which is what each entry was built from.
+  return params as unknown as {
+    [K in TicketFilterKey]: ReturnType<typeof filterParam<K>>;
+  };
+}
+
+/**
  * The GET /api/tickets query string. Query values arrive as strings, so `page`
  * is coerced; a missing one means the first page. A missing sort means newest
- * first — the list's order before sorting existed.
+ * first — the list's order before sorting existed. Filters come last, so a
+ * multiply-invalid query reports its page or sort first.
  */
 export const ticketListQuerySchema = z.object({
   page: z.coerce
@@ -107,6 +135,7 @@ export const ticketListQuerySchema = z.object({
     .enum(TICKET_SORT_FIELDS, { error: SORT_MESSAGE })
     .default(TicketSortField.createdAt),
   order: z.enum(SORT_ORDERS, { error: ORDER_MESSAGE }).default(SortOrder.desc),
+  ...filterParams(),
 });
 
 export type TicketListQuery = z.infer<typeof ticketListQuerySchema>;

@@ -2,10 +2,17 @@ import { describe, expect, test } from "bun:test";
 import {
   SORT_ORDERS,
   SortOrder,
+  TICKET_CATEGORIES,
   TICKET_SORT_FIELDS,
+  TicketCategory,
   TicketSortField,
 } from "../constants/tickets";
-import { inboundEmailSchema, NO_SUBJECT, ticketListQuerySchema } from "./tickets";
+import {
+  inboundEmailSchema,
+  NO_SUBJECT,
+  ticketListQuerySchema,
+  type TicketListQuery,
+} from "./tickets";
 
 const valid = {
   messageId: "<abc123@mail.example.com>",
@@ -123,7 +130,7 @@ describe("ticketListQuerySchema", () => {
     for (const sort of ["bogus", "", "createdat", "customer.name"]) {
       const parsed = ticketListQuerySchema.safeParse({ sort });
       expect(parsed.error?.issues[0]?.message).toBe(
-        "sort must be one of: id, subject, customer, status, createdAt",
+        "sort must be one of: id, subject, customer, status, category, createdAt",
       );
     }
   });
@@ -138,7 +145,7 @@ describe("ticketListQuerySchema", () => {
   test("reports the sort before the order when both are invalid", () => {
     const parsed = ticketListQuerySchema.safeParse({ sort: "bogus", order: "up" });
     expect(parsed.error?.issues[0]?.message).toBe(
-      "sort must be one of: id, subject, customer, status, createdAt",
+      "sort must be one of: id, subject, customer, status, category, createdAt",
     );
   });
 
@@ -162,5 +169,43 @@ describe("ticketListQuerySchema", () => {
   test("rejects an absurdly large page", () => {
     const parsed = ticketListQuerySchema.safeParse({ page: "1e12" });
     expect(parsed.error?.issues[0]?.message).toBe("page is too large");
+  });
+
+  test("no category means every category", () => {
+    expect("category" in ticketListQuerySchema.parse({})).toBe(false);
+  });
+
+  test("accepts each category as a filter", () => {
+    for (const category of TICKET_CATEGORIES) {
+      expect(ticketListQuerySchema.parse({ category }).category).toBe(category);
+    }
+  });
+
+  test("rejects an unknown category, including its display label", () => {
+    for (const category of ["bogus", "", "Refund Request", "REFUND_REQUEST"]) {
+      const parsed = ticketListQuerySchema.safeParse({ category });
+      expect(parsed.error?.issues[0]?.message).toBe(
+        "category must be one of: general_question, technical_question, refund_request",
+      );
+    }
+  });
+
+  test("reports the sort before a filter when both are invalid", () => {
+    const parsed = ticketListQuerySchema.safeParse({ sort: "bogus", category: "bogus" });
+    expect(parsed.error?.issues[0]?.message).toBe(
+      "sort must be one of: id, subject, customer, status, category, createdAt",
+    );
+  });
+
+  test("types the category as the category union, not string", () => {
+    const query: TicketListQuery = {
+      page: 1,
+      sort: TicketSortField.createdAt,
+      order: SortOrder.desc,
+      category: TicketCategory.refund_request,
+    };
+    // @ts-expect-error — only the registry's values type-check.
+    const bad: TicketListQuery = { ...query, category: "not_a_category" };
+    expect(String(bad.category)).toBe("not_a_category");
   });
 });

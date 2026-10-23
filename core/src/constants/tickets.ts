@@ -39,6 +39,17 @@ export const TicketCategory = {
 } as const satisfies { [C in TicketCategoryValue]: C };
 
 /**
+ * How each category reads on screen. The values above stay the stored and
+ * wire format; these are display only. The `satisfies` clause fails the build
+ * when a category is added without a label.
+ */
+export const TICKET_CATEGORY_LABELS = {
+  general_question: "General Question",
+  technical_question: "Technical Question",
+  refund_request: "Refund Request",
+} as const satisfies { [C in TicketCategoryValue]: string };
+
+/**
  * The columns GET /api/tickets can sort by. The server owns the ordering (each
  * maps to a Prisma orderBy in server/src/ticket-sort.ts); the client uses these
  * as its table column ids.
@@ -48,6 +59,7 @@ export const TICKET_SORT_FIELDS = [
   "subject",
   "customer",
   "status",
+  "category",
   "createdAt",
 ] as const;
 
@@ -59,6 +71,7 @@ export const TicketSortField = {
   subject: "subject",
   customer: "customer",
   status: "status",
+  category: "category",
   createdAt: "createdAt",
 } as const satisfies { [F in TicketSortFieldValue]: F };
 

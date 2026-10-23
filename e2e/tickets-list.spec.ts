@@ -1,9 +1,11 @@
 import { expect, test } from "@playwright/test";
 import {
   SortOrder,
+  TicketCategory,
   TicketSortField,
   TicketStatus,
   type SortOrderValue,
+  type TicketCategoryValue,
   type TicketSortFieldValue,
   type TicketStatusValue,
 } from "core";
@@ -26,6 +28,7 @@ type ApiTicket = {
   id: number;
   subject: string;
   status: string;
+  category: TicketCategoryValue | null;
   createdAt: string;
   customer: { name: string | null; email: string };
 };
@@ -36,6 +39,7 @@ type TicketList = {
   pageSize: number;
   sort: TicketSortFieldValue;
   order: SortOrderValue;
+  filters: { category?: TicketCategoryValue };
 };
 
 async function agentCookie(): Promise<string> {
@@ -81,6 +85,21 @@ async function walkSorted(
     for (const t of body.tickets) if (keep(t) && !seen.has(t.id)) seen.set(t.id, t);
   }
   return [...seen.values()];
+}
+
+/** Walks every page of a category-filtered listing in one pass; returns every ticket, the reported total and filters. */
+async function walkCategory(cookie: string, category: TicketCategoryValue) {
+  const tickets: ApiTicket[] = [];
+  let first: TicketList | undefined;
+  for (let page = 1; ; page++) {
+    const res = await listTickets(cookie, `?category=${category}&page=${page}`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as TicketList;
+    first ??= body;
+    if (body.tickets.length === 0) break;
+    tickets.push(...body.tickets);
+  }
+  return { tickets, total: first.total, filters: first.filters };
 }
 
 test.afterAll(async () => {
@@ -192,7 +211,50 @@ test.describe("GET /api/tickets", () => {
     const res = await listTickets(await agentCookie(), "?sort=bogus");
     expect(res.status).toBe(400);
     expect(await res.json()).toEqual({
-      error: "sort must be one of: id, subject, customer, status, createdAt",
+      error: "sort must be one of: id, subject, customer, status, category, createdAt",
+    });
+  });
+
+  // The WHERE must reach both findMany and count in Postgres, so only the real DB
+  // proves `total` is the filtered total.
+  test("filters by category in the database; total counts only the matches", async () => {
+    const run = uid();
+    const withCategory = async (tag: string, category: TicketCategoryValue | null) => {
+      const { id } = await newTicket(`${run} ${tag}`);
+      if (category) await db.ticket.update({ where: { id }, data: { category } });
+      return id;
+    };
+    const refundA = await withCategory("r1", TicketCategory.refund_request);
+    const refundB = await withCategory("r2", TicketCategory.refund_request);
+    const technical = await withCategory("t", TicketCategory.technical_question);
+    const uncategorized = await withCategory("n", null);
+    const cookie = await agentCookie();
+
+    const { tickets, total, filters } = await walkCategory(cookie, TicketCategory.refund_request);
+    const ids = tickets.map((t) => t.id);
+    expect(tickets.every((t) => t.category === TicketCategory.refund_request)).toBe(true);
+    expect(ids).toEqual(expect.arrayContaining([refundA, refundB]));
+    expect(ids).not.toContain(technical);
+    expect(ids).not.toContain(uncategorized);
+    expect(filters).toEqual({ category: TicketCategory.refund_request });
+
+    // Parallel specs may add tickets at any moment, so a db.ticket.count() taken
+    // before/after the API calls could race. Instead the filtered total must equal
+    // what one full walk collected, and be below the unfiltered total (read after,
+    // when it can only have grown).
+    expect(total).toBe(tickets.length);
+    const unfiltered = (await (await listTickets(cookie)).json()) as TicketList;
+    expect(unfiltered.filters).toEqual({});
+    expect(total).toBeLessThan(unfiltered.total);
+  });
+
+  // One bad value shows the route answers with the schema's message; the rules
+  // are unit-tested in core.
+  test("rejects ?category=bogus with 400 and the schema message", async () => {
+    const res = await listTickets(await agentCookie(), "?category=bogus");
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({
+      error: "category must be one of: general_question, technical_question, refund_request",
     });
   });
 

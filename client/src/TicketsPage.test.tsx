@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { cleanup, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useLocation } from "react-router";
-import { SortOrder, TicketSortField, TicketStatus } from "core";
+import { SortOrder, TicketCategory, TicketSortField, TicketStatus } from "core";
 import { renderWithQuery } from "./testRender";
 import { fakeHttp, httpCalls, restoreHttp, type FakeResponse } from "./testHttp";
 import { TicketsPage } from "./TicketsPage";
@@ -15,6 +15,7 @@ const ticket = (id: number, overrides: Partial<TicketRow> = {}): TicketRow => ({
   id,
   subject: `Subject ${id}`,
   status: TicketStatus.open,
+  category: null,
   createdAt: "2026-10-01T12:00:00.000Z",
   customer: { name: `Customer ${id}`, email: `c${id}@example.com` },
   ...overrides,
@@ -27,6 +28,7 @@ const pageOf = (tickets: TicketRow[], page: number, total: number): TicketPage =
   pageSize: 25,
   sort: TicketSortField.createdAt,
   order: SortOrder.desc,
+  filters: {},
 });
 
 /** Answers each GET with whatever `respond` returns for the requested page. */
@@ -70,14 +72,30 @@ const requestedQueries = () =>
     order: call.params?.order,
   }));
 
+/** Each request's category param — undefined when the list was unfiltered. */
+const requestedCategories = () => httpCalls().map((call) => call.params?.category);
+
+const categoryChoice = (name: string) =>
+  within(screen.getByRole("group", { name: "Category" })).getByRole("button", { name });
+
 const header = (name: string) => screen.getByRole("columnheader", { name });
 const sortButton = (name: string) => screen.getByRole("button", { name });
 
 describe("TicketsPage", () => {
-  test("shows each ticket's number, subject, customer, status and date", async () => {
+  test("shows each ticket's number, subject, customer, status, category and date", async () => {
     respond = () => ({
       status: 200,
-      data: pageOf([ticket(42, { status: TicketStatus.resolved }), ticket(41)], 1, 2),
+      data: pageOf(
+        [
+          ticket(42, {
+            status: TicketStatus.resolved,
+            category: TicketCategory.refund_request,
+          }),
+          ticket(41),
+        ],
+        1,
+        2,
+      ),
     });
     renderAt();
 
@@ -88,6 +106,7 @@ describe("TicketsPage", () => {
       "Subject 42",
       "Customer 42",
       TicketStatus.resolved,
+      "Refund Request",
       new Date("2026-10-01T12:00:00.000Z").toLocaleDateString(),
     ]);
     expect(requestedPages()).toEqual([["/api/tickets", 1]]);
@@ -204,7 +223,7 @@ describe("TicketsPage sorting", () => {
       { page: 1, sort: TicketSortField.createdAt, order: SortOrder.desc },
     ]);
     expect(header("Created")).toHaveAttribute("aria-sort", "descending");
-    for (const name of ["Ticket #", "Subject", "Customer", "Status"]) {
+    for (const name of ["Ticket #", "Subject", "Customer", "Status", "Category"]) {
       expect(header(name)).toHaveAttribute("aria-sort", "none");
     }
     expect(locationSearch()).toBe("");
@@ -335,6 +354,7 @@ describe("TicketsPage sorting — first clicks, loading and edge cases", () => {
       "Subject",
       "Customer",
       "Status",
+      "Category",
       "Created",
     ]);
     for (const h of headers) {
@@ -437,5 +457,197 @@ describe("TicketsPage sorting — first clicks, loading and edge cases", () => {
 
     await user.click(sortButton("Customer"));
     expect(await screen.findByText("Could not load tickets.")).toBeTruthy();
+  });
+});
+
+// The server filters; these specs check what the page asks it for and writes to
+// the URL. The fake answers by category where it matters — the matching itself
+// is server/src/ticket-filters.test.ts and e2e/tickets-list.spec.ts.
+describe("TicketsPage filtering by category", () => {
+  const onePage = () => ({ status: 200, data: pageOf([ticket(1)], 1, 1) });
+
+  test("starts unfiltered, with All pressed", async () => {
+    respond = onePage;
+    renderAt();
+    await screen.findByRole("cell", { name: "#1" });
+
+    expect(requestedCategories()).toEqual([undefined]);
+    expect(categoryChoice("All")).toHaveAttribute("aria-pressed", "true");
+    expect(locationSearch()).toBe("");
+  });
+
+  test("choosing a category requests it and writes it to the URL", async () => {
+    respond = onePage;
+    const user = userEvent.setup();
+    renderAt();
+    await screen.findByRole("cell", { name: "#1" });
+
+    await user.click(categoryChoice("Refund Request"));
+    expect(locationSearch()).toBe("?category=refund_request");
+    expect(categoryChoice("Refund Request")).toHaveAttribute("aria-pressed", "true");
+    expect(categoryChoice("All")).toHaveAttribute("aria-pressed", "false");
+    await screen.findByRole("cell", { name: "#1" });
+    expect(requestedCategories()).toEqual([undefined, TicketCategory.refund_request]);
+  });
+
+  test("All clears the filter", async () => {
+    respond = onePage;
+    const user = userEvent.setup();
+    renderAt("/tickets?category=technical_question");
+    await screen.findByRole("cell", { name: "#1" });
+
+    await user.click(categoryChoice("All"));
+    expect(locationSearch()).toBe("");
+    await screen.findByRole("cell", { name: "#1" });
+    expect(requestedCategories()).toEqual([TicketCategory.technical_question, undefined]);
+  });
+
+  test("opens with the category named in the URL", async () => {
+    respond = onePage;
+    renderAt("/tickets?category=general_question");
+    await screen.findByRole("cell", { name: "#1" });
+
+    expect(requestedCategories()).toEqual([TicketCategory.general_question]);
+    expect(categoryChoice("General Question")).toHaveAttribute("aria-pressed", "true");
+  });
+
+  test("treats an unknown category in the URL — even a display name — as All", async () => {
+    for (const bad of ["bogus", "Refund%20Request"]) {
+      respond = onePage;
+      fakeHttp((config) => respond(Number(config.params?.page)));
+      renderAt(`/tickets?category=${bad}`);
+      await screen.findByRole("cell", { name: "#1" });
+
+      expect(requestedCategories()).toEqual([undefined]);
+      expect(categoryChoice("All")).toHaveAttribute("aria-pressed", "true");
+      cleanup();
+    }
+  });
+
+  test("a new filter returns to page 1 and keeps the sort", async () => {
+    respond = (page) => ({ status: 200, data: pageOf([ticket(page)], page, 60) });
+    const user = userEvent.setup();
+    renderAt("/tickets?page=2&sort=subject&order=asc");
+    await screen.findByRole("cell", { name: "#2" });
+
+    await user.click(categoryChoice("Technical Question"));
+    expect(locationSearch()).toBe("?sort=subject&order=asc&category=technical_question");
+    await screen.findByRole("cell", { name: "#1" });
+    expect(requestedQueries().at(-1)).toEqual({
+      page: 1,
+      sort: TicketSortField.subject,
+      order: SortOrder.asc,
+    });
+    expect(requestedCategories().at(-1)).toBe(TicketCategory.technical_question);
+  });
+
+  test("sorting keeps the filter", async () => {
+    respond = onePage;
+    const user = userEvent.setup();
+    renderAt("/tickets?category=refund_request");
+    await screen.findByRole("cell", { name: "#1" });
+
+    await user.click(sortButton("Customer"));
+    expect(locationSearch()).toBe("?sort=customer&order=asc&category=refund_request");
+    await screen.findByRole("cell", { name: "#1" });
+    expect(requestedCategories()).toEqual([
+      TicketCategory.refund_request,
+      TicketCategory.refund_request,
+    ]);
+  });
+
+  test("Next and Previous keep the filter", async () => {
+    respond = (page) =>
+      page === 2
+        ? { status: 200, data: pageOf([ticket(26)], 2, 26) }
+        : { status: 200, data: pageOf(Array.from({ length: 25 }, (_, i) => ticket(i + 1)), 1, 26) };
+    const user = userEvent.setup();
+    renderAt("/tickets?category=general_question");
+    await screen.findByRole("cell", { name: "#1" });
+
+    await user.click(screen.getByRole("button", { name: "Next" }));
+    await screen.findByRole("cell", { name: "#26" });
+    expect(locationSearch()).toBe("?page=2&category=general_question");
+
+    await user.click(screen.getByRole("button", { name: "Previous" }));
+    await screen.findByRole("cell", { name: "#1" });
+    expect(locationSearch()).toBe("?category=general_question");
+    expect(requestedCategories()).toEqual([
+      TicketCategory.general_question,
+      TicketCategory.general_question,
+      TicketCategory.general_question,
+    ]);
+  });
+
+  test("says no tickets match when a filter finds none", async () => {
+    fakeHttp((config) =>
+      config.params?.category === TicketCategory.refund_request
+        ? { status: 200, data: pageOf([], 1, 0) }
+        : onePage(),
+    );
+    const user = userEvent.setup();
+    renderAt();
+    await screen.findByRole("cell", { name: "#1" });
+
+    await user.click(categoryChoice("Refund Request"));
+    expect(await screen.findByText("No tickets match this filter.")).toBeTruthy();
+    expect(screen.queryByText("No tickets yet.")).toBeNull();
+    // The filter stays usable, so the reader can widen the search again.
+    await user.click(categoryChoice("All"));
+    expect(await screen.findByRole("cell", { name: "#1" })).toBeTruthy();
+  });
+
+  test("an empty list with no filter still says there are no tickets yet", async () => {
+    renderAt();
+    expect(await screen.findByText("No tickets yet.")).toBeTruthy();
+    expect(screen.queryByText("No tickets match this filter.")).toBeNull();
+  });
+
+  test("the filter stays available when the list fails to load", async () => {
+    respond = () => ({ status: 500, data: { error: "internal server error" } });
+    renderAt("/tickets?category=refund_request");
+
+    await screen.findByText("Could not load tickets.");
+    expect(categoryChoice("Refund Request")).toHaveAttribute("aria-pressed", "true");
+  });
+
+  test("shows each category by its display name and uncategorized as a dash", async () => {
+    respond = () => ({
+      status: 200,
+      data: pageOf(
+        [
+          ticket(4, { category: TicketCategory.general_question }),
+          ticket(3, { category: TicketCategory.technical_question }),
+          ticket(2, { category: TicketCategory.refund_request }),
+          ticket(1, { category: null }),
+        ],
+        1,
+        4,
+      ),
+    });
+    renderAt();
+    await screen.findByRole("cell", { name: "#4" });
+
+    const categoryCells = screen
+      .getAllByRole("row")
+      .slice(1) // header
+      .map((row) => within(row).getAllByRole("cell")[4]!.textContent);
+    expect(categoryCells).toEqual([
+      "General Question",
+      "Technical Question",
+      "Refund Request",
+      "—",
+    ]);
+  });
+
+  test("the Category header sorts by category, A→Z first", async () => {
+    respond = onePage;
+    const user = userEvent.setup();
+    renderAt();
+    await screen.findByRole("cell", { name: "#1" });
+
+    await user.click(sortButton("Category"));
+    expect(locationSearch()).toBe("?sort=category&order=asc");
+    expect(header("Category")).toHaveAttribute("aria-sort", "ascending");
   });
 });

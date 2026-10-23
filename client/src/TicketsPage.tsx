@@ -12,15 +12,20 @@ import { ArrowDown, ArrowUp, ArrowUpDown } from "lucide-react";
 import {
   SORT_ORDERS,
   SortOrder,
+  TICKET_CATEGORY_LABELS,
+  TICKET_FILTER_KEYS,
+  TICKET_FILTERS,
   TICKET_SORT_FIELDS,
   TicketSortField,
   type SortOrderValue,
+  type TicketFilterValues,
   type TicketListQuery,
   type TicketSortFieldValue,
 } from "core";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { getTickets, type TicketRow } from "@/lib/api";
+import { TicketFilters, type TicketFilterChange } from "./TicketFilters";
 import { queryKeys } from "@/lib/queryKeys";
 
 const SKELETON_ROWS = 5;
@@ -53,32 +58,43 @@ const COLUMNS = column.columns([
     header: "Ticket #",
     cell: (info) => `#${info.getValue()}`,
     sortDescFirst: true,
-    meta: { width: "w-[10%]", bar: "w-10" },
+    meta: { width: "w-[9%]", bar: "w-10" },
   }),
   column.accessor("subject", {
     id: TicketSortField.subject,
     header: "Subject",
     sortDescFirst: false,
-    meta: { width: "w-[38%]", bar: "w-48" },
+    meta: { width: "w-[30%]", bar: "w-48" },
   }),
   column.accessor(customerLabel, {
     id: TicketSortField.customer,
     header: "Customer",
     sortDescFirst: false,
-    meta: { width: "w-[24%]", bar: "w-32" },
+    meta: { width: "w-[20%]", bar: "w-32" },
   }),
   column.accessor("status", {
     id: TicketSortField.status,
     header: "Status",
     sortDescFirst: false,
-    meta: { width: "w-[12%]", bar: "w-14" },
+    meta: { width: "w-[10%]", bar: "w-14" },
+  }),
+  // Shown by its display label; uncategorized (null) reads as a dash.
+  column.accessor("category", {
+    id: TicketSortField.category,
+    header: "Category",
+    cell: (info) => {
+      const category = info.getValue();
+      return category ? TICKET_CATEGORY_LABELS[category] : "—";
+    },
+    sortDescFirst: false,
+    meta: { width: "w-[17%]", bar: "w-24" },
   }),
   column.accessor("createdAt", {
     id: TicketSortField.createdAt,
     header: "Created",
     cell: (info) => formatCreated(info.getValue()),
     sortDescFirst: true,
-    meta: { width: "w-[16%]", bar: "w-20" },
+    meta: { width: "w-[14%]", bar: "w-20" },
   }),
 ]);
 
@@ -105,15 +121,38 @@ function sortFrom(params: URLSearchParams): Pick<TicketListQuery, "sort" | "orde
 }
 
 /**
- * The URL for a query. Defaults stay out of it, as `page=1` always has, so the
- * plain /tickets link is the newest-first first page.
+ * The filters in the URL, one param per core TICKET_FILTERS entry. A missing or
+ * unknown value is no filter ("All"), as an unknown sort is the default order.
  */
-function searchFor({ page, sort, order }: TicketListQuery): Record<string, string> {
+function filtersFrom(params: URLSearchParams): TicketFilterValues {
+  const filters: Record<string, string> = {};
+  for (const key of TICKET_FILTER_KEYS) {
+    const raw = params.get(key);
+    const value = TICKET_FILTERS[key].values.find((option) => option === raw);
+    if (value) filters[key] = value;
+  }
+  // Each value was matched against its own key's values above.
+  return filters as TicketFilterValues;
+}
+
+const hasFilters = (filters: TicketFilterValues) =>
+  TICKET_FILTER_KEYS.some((key) => filters[key] !== undefined);
+
+/**
+ * The URL for a query. Defaults stay out of it, as `page=1` always has, so the
+ * plain /tickets link is the newest-first first page of every ticket.
+ */
+function searchFor(query: TicketListQuery): Record<string, string> {
+  const { page, sort, order } = query;
   const search: Record<string, string> = {};
   if (page !== 1) search.page = String(page);
   if (sort !== DEFAULT_SORT || order !== DEFAULT_ORDER) {
     search.sort = sort;
     search.order = order;
+  }
+  for (const key of TICKET_FILTER_KEYS) {
+    const value = query[key];
+    if (value !== undefined) search[key] = value;
   }
   return search;
 }
@@ -228,11 +267,12 @@ function useTicketsTable(
 }
 
 export function TicketsPage() {
-  // The page and sort live in the URL, so a reload or Back keeps the reader's
-  // place and order.
+  // The page, sort and filters live in the URL, so a reload or Back keeps the
+  // reader's place, order and selection.
   const [searchParams, setSearchParams] = useSearchParams();
   const page = pageFrom(searchParams);
-  const query: TicketListQuery = { page, ...sortFrom(searchParams) };
+  const filters = filtersFrom(searchParams);
+  const query: TicketListQuery = { page, ...sortFrom(searchParams), ...filters };
 
   // keepPreviousData holds the current page on screen while the next one loads,
   // instead of dropping back to the skeleton on every click.
@@ -243,10 +283,12 @@ export function TicketsPage() {
   });
 
   const goTo = (next: number) => setSearchParams(searchFor({ ...query, page: next }));
-  // A new order starts over at the first page: page 3 of a different order is
-  // a different set of tickets.
+  // A new order or filter starts over at the first page: page 3 of a different
+  // order or selection is a different set of tickets. Each keeps the other.
   const sortBy = (sort: TicketSortFieldValue, order: SortOrderValue) =>
-    setSearchParams(searchFor({ page: 1, sort, order }));
+    setSearchParams(searchFor({ ...query, page: 1, sort, order }));
+  const filterBy: TicketFilterChange = (key, value) =>
+    setSearchParams(searchFor({ ...query, page: 1, [key]: value }));
 
   const tickets = data?.tickets ?? [];
   const table = useTicketsTable(tickets, query, sortBy);
@@ -258,11 +300,19 @@ export function TicketsPage() {
     <main className="p-8 font-sans text-gray-900">
       <h1 className="text-2xl font-bold">Tickets</h1>
 
-      <section className="mt-6" aria-busy={isPending || isPlaceholderData}>
+      {/* Outside the busy section so it stays usable whatever the list shows,
+          including "no matches" and errors. */}
+      <div className="mt-6 max-w-4xl">
+        <TicketFilters values={filters} onChange={filterBy} />
+      </div>
+
+      <section className="mt-4" aria-busy={isPending || isPlaceholderData}>
         {isError && <p className="text-sm text-red-600">Could not load tickets.</p>}
         {!isError && isPending && <TicketsTableSkeleton table={table} />}
         {!isError && data && data.total === 0 && (
-          <p className="text-sm text-gray-500">No tickets yet.</p>
+          <p className="text-sm text-gray-500">
+            {hasFilters(filters) ? "No tickets match this filter." : "No tickets yet."}
+          </p>
         )}
         {/* A bookmarked page that no longer exists, e.g. ?page=9 of 3. */}
         {!isError && data && data.total > 0 && tickets.length === 0 && (

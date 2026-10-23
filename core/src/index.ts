@@ -3,4 +3,5 @@
 // because both workspaces import it as source (see package.json exports).
 export * from "./users";
 export * from "./constants/tickets";
+export * from "./filters/tickets";
 export * from "./schemas/tickets";

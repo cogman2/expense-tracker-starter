@@ -35,6 +35,15 @@ describe("ticketOrderBy", () => {
     }
   });
 
+  test("category sorts with uncategorized tickets last, then id", () => {
+    for (const order of SORT_ORDERS) {
+      expect(ticketOrderBy(TicketSortField.category, order)).toEqual([
+        { category: { sort: order, nulls: "last" } },
+        { id: order },
+      ]);
+    }
+  });
+
   test("every sort ends with the id, so pages never overlap", () => {
     for (const sort of TICKET_SORT_FIELDS) {
       for (const order of SORT_ORDERS) {

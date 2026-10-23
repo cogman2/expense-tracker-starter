@@ -4,6 +4,8 @@ import axios from "axios";
 import type {
   CreateUserInput,
   SortOrderValue,
+  TicketCategoryValue,
+  TicketFilterValues,
   TicketListQuery,
   TicketSortFieldValue,
   TicketStatusValue,
@@ -94,23 +96,28 @@ export interface TicketRow {
   id: number;
   subject: string;
   status: TicketStatusValue;
+  /** Null until someone categorizes the ticket — inbound email arrives without one. */
+  category: TicketCategoryValue | null;
   createdAt: string;
   customer: { name: string | null; email: string };
 }
 
-/** One page of the ticket list, in the order the server was asked for. */
+/** One page of the ticket list, filtered and ordered as the server was asked. */
 export interface TicketPage {
   tickets: TicketRow[];
-  /** Every ticket, not just this page's. */
+  /** Every matching ticket, not just this page's. */
   total: number;
   page: number;
   pageSize: number;
   sort: TicketSortFieldValue;
   order: SortOrderValue;
+  /** The filters the server applied; only those present, `{}` for none. */
+  filters: TicketFilterValues;
 }
 
-// The server sorts (it is the only side that sees every page), so the sort goes
-// out as query params alongside the page.
+// The server filters and sorts (it is the only side that sees every page), so
+// the filters and sort go out as query params alongside the page. An absent
+// filter is left out of the query string (axios drops undefined params).
 export async function getTickets(
   query: TicketListQuery,
   signal?: AbortSignal,
