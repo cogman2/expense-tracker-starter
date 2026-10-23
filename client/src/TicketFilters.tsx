@@ -51,9 +51,13 @@ function FilterGroup<K extends TicketFilterKey>({
 }) {
   const labelId = useId();
   const { label, values, optionLabels } = TICKET_FILTERS[filterKey];
-  const choices: { value: TicketFilterValue<K> | undefined; label: string }[] = [
-    { value: undefined, label: "All" },
-    ...values.map((option) => ({ value: option, label: optionLabels[option] })),
+  // `id` keys each button by value, not label: labels needn't be unique (an
+  // option could even be labelled "All"). "All" has no value, so it gets the
+  // empty id — never a real option's value, since an empty query param can't
+  // select one.
+  const choices: { id: string; value: TicketFilterValue<K> | undefined; label: string }[] = [
+    { id: "", value: undefined, label: "All" },
+    ...values.map((option) => ({ id: option, value: option, label: optionLabels[option] })),
   ];
 
   return (
@@ -65,7 +69,7 @@ function FilterGroup<K extends TicketFilterKey>({
         const pressed = choice.value === value;
         return (
           <Button
-            key={choice.label}
+            key={choice.id}
             type="button"
             size="sm"
             variant={pressed ? "default" : "outline"}

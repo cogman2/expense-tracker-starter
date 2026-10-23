@@ -14,10 +14,12 @@ export interface UserFilters {
 }
 
 /**
- * Which slice of the ticket list: the page and its server-side sort, so each
- * ordering caches separately. Filters join here later.
+ * Which slice of the ticket list: the page, its server-side sort and any
+ * filters (core's TICKET_FILTERS) — the whole GET /api/tickets query, so each
+ * page, ordering and selection caches separately. Not to be confused with the
+ * TicketFilters component (client/src/TicketFilters.tsx), the filter controls.
  */
-export type TicketFilters = TicketListQuery;
+export type TicketListKey = TicketListQuery;
 
 export const queryKeys = {
   health: ["health"] as const,
@@ -27,6 +29,6 @@ export const queryKeys = {
   },
   tickets: {
     all: ["tickets"] as const,
-    list: (filters: TicketFilters) => ["tickets", "list", filters] as const,
+    list: (query: TicketListKey) => ["tickets", "list", query] as const,
   },
 } as const;

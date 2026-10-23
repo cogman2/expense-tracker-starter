@@ -29,7 +29,11 @@ export interface FilterDefinition<V extends string> {
 
 /**
  * Identity, for inference: it ties `optionLabels` to `values`, so a value
- * without a label (or a label for no value) fails the build.
+ * without a label fails the build. A label for a value the filter doesn't
+ * accept is NOT caught here — TypeScript doesn't check excess keys on an object
+ * passed by reference — so give each labels map its own `satisfies` clause, as
+ * TICKET_CATEGORY_LABELS does (core/src/constants/tickets.ts). The registry test
+ * (./tickets.test.ts) also checks every filter's labels match its values.
  */
 export const defineFilter = <V extends string>(definition: FilterDefinition<V>) =>
   definition;

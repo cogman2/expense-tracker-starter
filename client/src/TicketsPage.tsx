@@ -292,6 +292,11 @@ export function TicketsPage() {
 
   const tickets = data?.tickets ?? [];
   const table = useTicketsTable(tickets, query, sortBy);
+  // Everything describing the list on screen comes from the response, not the
+  // URL: while a new page, sort or filter loads, keepPreviousData keeps the
+  // previous response on screen, and its page, total and filters are the ones
+  // that match the rows shown. The URL's values only take over once they load.
+  const shownPage = data?.page ?? page;
   const totalPages = data ? Math.max(1, Math.ceil(data.total / data.pageSize)) : 1;
   const first = data ? (data.page - 1) * data.pageSize + 1 : 0;
   const last = data ? first + tickets.length - 1 : 0;
@@ -311,7 +316,7 @@ export function TicketsPage() {
         {!isError && isPending && <TicketsTableSkeleton table={table} />}
         {!isError && data && data.total === 0 && (
           <p className="text-sm text-gray-500">
-            {hasFilters(filters) ? "No tickets match this filter." : "No tickets yet."}
+            {hasFilters(data.filters) ? "No tickets match this filter." : "No tickets yet."}
           </p>
         )}
         {/* A bookmarked page that no longer exists, e.g. ?page=9 of 3. */}
@@ -355,20 +360,20 @@ export function TicketsPage() {
                   type="button"
                   variant="outline"
                   size="sm"
-                  disabled={page <= 1}
-                  onClick={() => goTo(page - 1)}
+                  disabled={shownPage <= 1 || isPlaceholderData}
+                  onClick={() => goTo(shownPage - 1)}
                 >
                   Previous
                 </Button>
                 <span className="text-gray-500">
-                  Page {page} of {totalPages}
+                  Page {shownPage} of {totalPages}
                 </span>
                 <Button
                   type="button"
                   variant="outline"
                   size="sm"
-                  disabled={page >= totalPages || isPlaceholderData}
-                  onClick={() => goTo(page + 1)}
+                  disabled={shownPage >= totalPages || isPlaceholderData}
+                  onClick={() => goTo(shownPage + 1)}
                 >
                   Next
                 </Button>

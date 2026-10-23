@@ -580,9 +580,13 @@ describe("TicketsPage filtering by category", () => {
   });
 
   test("says no tickets match when a filter finds none", async () => {
+    // Like the server, the fake echoes the filter it applied.
     fakeHttp((config) =>
       config.params?.category === TicketCategory.refund_request
-        ? { status: 200, data: pageOf([], 1, 0) }
+        ? {
+            status: 200,
+            data: { ...pageOf([], 1, 0), filters: { category: TicketCategory.refund_request } },
+          }
         : onePage(),
     );
     const user = userEvent.setup();
@@ -649,5 +653,52 @@ describe("TicketsPage filtering by category", () => {
     await user.click(sortButton("Category"));
     expect(locationSearch()).toBe("?sort=category&order=asc");
     expect(header("Category")).toHaveAttribute("aria-sort", "ascending");
+  });
+});
+
+// While a new page, sort or filter loads, the previous response stays on screen
+// (keepPreviousData). Everything describing the list must match those rows, not
+// the URL that is still loading.
+describe("TicketsPage while a change loads", () => {
+  test("keeps the no-match message for the filter still shown, not 'No tickets yet.'", async () => {
+    fakeHttp((config) =>
+      config.params?.category
+        ? {
+            status: 200,
+            data: { ...pageOf([], 1, 0), filters: { category: TicketCategory.refund_request } },
+          }
+        : { status: 200, pending: true },
+    );
+    const user = userEvent.setup();
+    renderAt("/tickets?category=refund_request");
+    await screen.findByText("No tickets match this filter.");
+
+    await user.click(categoryChoice("All"));
+    expect(locationSearch()).toBe("");
+    expect(screen.getByText("No tickets match this filter.")).toBeTruthy();
+    expect(screen.queryByText("No tickets yet.")).toBeNull();
+  });
+
+  test("the range, page number and buttons describe the rows shown", async () => {
+    const page2 = Array.from({ length: 2 }, (_, i) => ticket(i + 1));
+    fakeHttp((config) =>
+      config.params?.category
+        ? { status: 200, pending: true }
+        : { status: 200, data: pageOf(page2, 2, 27) },
+    );
+    const user = userEvent.setup();
+    renderAt("/tickets?page=2");
+    await screen.findByRole("cell", { name: "#1" });
+    expect(screen.getByText("Showing 26–27 of 27")).toBeTruthy();
+    expect(screen.getByText("Page 2 of 2")).toBeTruthy();
+
+    // The URL moves to page 1 of the filter; the screen still shows page 2.
+    await user.click(categoryChoice("Refund Request"));
+    expect(locationSearch()).toBe("?category=refund_request");
+    expect(screen.getByText("Showing 26–27 of 27")).toBeTruthy();
+    expect(screen.getByText("Page 2 of 2")).toBeTruthy();
+    // Paging off rows that are about to be replaced would land somewhere odd.
+    expect(screen.getByRole("button", { name: "Previous" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Next" })).toBeDisabled();
   });
 });
