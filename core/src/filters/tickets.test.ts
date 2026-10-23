@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { TICKET_CATEGORIES, TICKET_CATEGORY_LABELS } from "../constants/tickets";
-import { TICKET_FILTER_KEYS, TICKET_FILTERS } from "./tickets";
+import { defineFilter, TICKET_FILTER_KEYS, TICKET_FILTERS } from "./tickets";
 
 describe("TICKET_FILTERS", () => {
   test("filters by category, the only filter today", () => {
@@ -26,5 +26,20 @@ describe("TICKET_FILTERS", () => {
         expect(label.trim()).not.toBe("");
       }
     }
+  });
+
+  // A compile-time check: the @ts-expect-error line fails `bun run typecheck`
+  // if defineFilter ever stops rejecting a value that has no label.
+  test("defineFilter needs a label for every value it accepts", () => {
+    const complete = defineFilter({
+      label: "Example",
+      values: ["a", "b"],
+      optionLabels: { a: "A", b: "B" },
+    });
+    expect(complete.optionLabels.b).toBe("B");
+
+    const labelsMissingB = { a: "A" };
+    // @ts-expect-error — "b" is accepted but has no label.
+    defineFilter({ label: "Example", values: ["a", "b"], optionLabels: labelsMissingB });
   });
 });

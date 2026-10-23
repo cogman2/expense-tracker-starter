@@ -8,18 +8,28 @@ import type { Prisma } from "./generated/prisma/client";
 
 type TicketWhere = Prisma.TicketWhereInput;
 
-// Compile-time check that every filter key is a Ticket column that accepts the
-// filter's values as an equality match. A registry entry keyed by something
-// that isn't a column — or whose values the column can't hold — fails
-// `bun run typecheck` here, which is what makes the loop below safe.
-type Assert<T extends true> = T;
-type FilterMatchesColumn<K extends TicketFilterKey> = K extends keyof TicketWhere
-  ? [TicketFilterValue<K>] extends [TicketWhere[K]]
+/**
+ * `true` when `Column` is a Ticket column whose `where` accepts `Value` as an
+ * equality match, else `false`. Generic so ticket-filters.test.ts can try keys
+ * the registry doesn't have.
+ */
+export type ColumnAccepts<Column extends string, Value> = Column extends keyof TicketWhere
+  ? [Value] extends [TicketWhere[Column]]
     ? true
     : false
   : false;
+
+// Compile-time check that every filter key is a Ticket column that accepts the
+// filter's values. A registry entry keyed by something that isn't a column — or
+// whose values the column can't hold — makes one entry `false`, the union
+// `boolean`, and `bun run typecheck` fail here, which is what makes the cast in
+// ticketWhere safe.
+type Assert<T extends true> = T;
+type EveryFilterMatchesItsColumn = {
+  [K in TicketFilterKey]: ColumnAccepts<K, TicketFilterValue<K>>;
+}[TicketFilterKey];
 export type TicketFiltersMatchColumns = Assert<
-  FilterMatchesColumn<TicketFilterKey> extends true ? true : false
+  EveryFilterMatchesItsColumn extends true ? true : false
 >;
 
 /**
