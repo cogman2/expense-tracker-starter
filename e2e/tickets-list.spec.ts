@@ -205,6 +205,29 @@ test.describe("GET /api/tickets", () => {
     expect(await ours(SortOrder.desc)).toEqual([closed, resolved, open]);
   });
 
+  // Enum declaration order and NULLS LAST are Postgres behaviour; unit tests only check the orderBy shape.
+  test("sorts by category in enum order, uncategorized last in both directions", async () => {
+    const run = uid();
+    const withCategory = async (tag: string, category: TicketCategoryValue | null) => {
+      const { id } = await newTicket(`${run} ${tag}`);
+      if (category) await db.ticket.update({ where: { id }, data: { category } });
+      return id;
+    };
+    // Created scrambled so insertion/id order can't pass the test.
+    const technical = await withCategory("t", TicketCategory.technical_question);
+    const uncategorized = await withCategory("n", null);
+    const refund = await withCategory("r", TicketCategory.refund_request);
+    const general = await withCategory("g", TicketCategory.general_question);
+    const cookie = await agentCookie();
+    const ours = (order: SortOrderValue) =>
+      walkSorted(cookie, TicketSortField.category, order, (t) => t.subject.includes(run)).then((ts) =>
+        ts.map((t) => t.id),
+      );
+
+    expect(await ours(SortOrder.asc)).toEqual([general, technical, refund, uncategorized]);
+    expect(await ours(SortOrder.desc)).toEqual([refund, technical, general, uncategorized]);
+  });
+
   // One bad value shows the route answers with the schema's message; the rules
   // are unit-tested in core/src/schemas/tickets.test.ts.
   test("rejects ?sort=bogus with 400 and the schema message", async () => {

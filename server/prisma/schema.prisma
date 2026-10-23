@@ -119,6 +119,7 @@ model Ticket {
 
   @@index([status, createdAt])
   @@index([createdAt]) // the ticket list's newest-first sort
+  @@index([category, createdAt]) // ?category= filtering (and its count), newest first
 }
 
 // One email in a ticket's thread. messageId is the RFC 5322 Message-ID (without
