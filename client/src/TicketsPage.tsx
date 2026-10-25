@@ -181,8 +181,11 @@ function TicketsTableFrame({
   children: ReactNode;
 }) {
   return (
+    // min-w keeps six fixed-width columns readable on a phone: below 44rem the
+    // table scrolls sideways inside this wrapper instead of squeezing to the
+    // screen and breaking words mid-way ("Thomp/son"). Wider screens unchanged.
     <div className="max-w-4xl overflow-x-auto">
-      <table className="w-full table-fixed border-collapse text-left text-sm">
+      <table className="w-full min-w-[44rem] table-fixed border-collapse text-left text-sm">
         <colgroup>
           {table.getAllLeafColumns().map((col) => (
             <col key={col.id} className={col.columnDef.meta?.width} />
