@@ -22,9 +22,9 @@ import {
   type TicketListQuery,
   type TicketSortFieldValue,
 } from "core";
-import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { getTickets, type TicketRow } from "@/lib/api";
+import { Pager } from "./Pager";
 import { TicketFilters, type TicketFilterChange } from "./TicketFilters";
 import { queryKeys } from "@/lib/queryKeys";
 
@@ -348,37 +348,20 @@ export function TicketsPage() {
               </tbody>
             </TicketsTableFrame>
 
-            <nav
-              aria-label="Ticket pages"
-              className="mt-4 flex max-w-4xl items-center justify-between text-sm"
-            >
+            <div className="mt-4 flex max-w-4xl flex-wrap items-center justify-between gap-3 text-sm">
               <span className="text-gray-500">
                 Showing {first}–{last} of {data!.total}
               </span>
-              <div className="flex items-center gap-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  disabled={shownPage <= 1 || isPlaceholderData}
-                  onClick={() => goTo(shownPage - 1)}
-                >
-                  Previous
-                </Button>
-                <span className="text-gray-500">
-                  Page {shownPage} of {totalPages}
-                </span>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  disabled={shownPage >= totalPages || isPlaceholderData}
-                  onClick={() => goTo(shownPage + 1)}
-                >
-                  Next
-                </Button>
-              </div>
-            </nav>
+              {/* Describes the page on screen, not the URL: while another loads,
+                  every control is disabled rather than paging off stale rows. */}
+              <Pager
+                page={shownPage}
+                totalPages={totalPages}
+                onPageChange={goTo}
+                disabled={isPlaceholderData}
+                label="Ticket pages"
+              />
+            </div>
           </>
         )}
       </section>

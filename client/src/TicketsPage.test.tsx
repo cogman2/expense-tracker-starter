@@ -78,6 +78,12 @@ const requestedCategories = () => httpCalls().map((call) => call.params?.categor
 const categoryChoice = (name: string) =>
   within(screen.getByRole("group", { name: "Category" })).getByRole("button", { name });
 
+/** The pager's highlighted page, the page the reader is on. */
+const currentPage = () =>
+  within(screen.getByRole("navigation", { name: "Ticket pages" }))
+    .getByRole("button", { current: "page" })
+    .textContent;
+
 const header = (name: string) => screen.getByRole("columnheader", { name });
 const sortButton = (name: string) => screen.getByRole("button", { name });
 
@@ -157,20 +163,20 @@ describe("TicketsPage", () => {
 
     await screen.findByRole("cell", { name: "#30" });
     expect(screen.getByText("Showing 1–25 of 27")).toBeTruthy();
-    expect(screen.getByText("Page 1 of 2")).toBeTruthy();
+    expect(currentPage()).toBe("1");
     const previous = () => screen.getByRole("button", { name: "Previous" });
     const next = () => screen.getByRole("button", { name: "Next" });
-    expect(previous()).toBeDisabled();
-    expect(next()).toBeEnabled();
+    expect(previous()).toHaveAttribute("aria-disabled", "true");
+    expect(next()).not.toHaveAttribute("aria-disabled");
     expect(locationSearch()).toBe("");
 
     await user.click(next());
     await screen.findByRole("cell", { name: "#5" });
     expect(locationSearch()).toBe("?page=2");
     expect(screen.getByText("Showing 26–27 of 27")).toBeTruthy();
-    expect(screen.getByText("Page 2 of 2")).toBeTruthy();
-    expect(next()).toBeDisabled();
-    expect(previous()).toBeEnabled();
+    expect(currentPage()).toBe("2");
+    expect(next()).toHaveAttribute("aria-disabled", "true");
+    expect(previous()).not.toHaveAttribute("aria-disabled");
 
     await user.click(previous());
     await screen.findByRole("cell", { name: "#30" });
@@ -432,7 +438,6 @@ describe("TicketsPage sorting — first clicks, loading and edge cases", () => {
     expect(header("Subject")).toHaveAttribute("aria-sort", "ascending");
     expect(screen.getByRole("cell", { name: "#1" })).toBeTruthy();
     expect(container.querySelector("section")).toHaveAttribute("aria-busy", "true");
-    expect(screen.getByRole("button", { name: "Next" })).toBeDisabled();
   });
 
   test("shows the error when a sorted request fails", async () => {
@@ -631,15 +636,87 @@ describe("TicketsPage while a change loads", () => {
     renderAt("/tickets?page=2");
     await screen.findByRole("cell", { name: "#1" });
     expect(screen.getByText("Showing 26–27 of 27")).toBeTruthy();
-    expect(screen.getByText("Page 2 of 2")).toBeTruthy();
+    expect(currentPage()).toBe("2");
 
     // The URL moves to page 1 of the filter; the screen still shows page 2.
     await user.click(categoryChoice("Refund Request"));
     expect(locationSearch()).toBe("?category=refund_request");
     expect(screen.getByText("Showing 26–27 of 27")).toBeTruthy();
-    expect(screen.getByText("Page 2 of 2")).toBeTruthy();
+    expect(currentPage()).toBe("2");
     // Paging off rows that are about to be replaced would land somewhere odd.
-    expect(screen.getByRole("button", { name: "Previous" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Next" })).toBeDisabled();
+    // Unavailable but still focusable (aria-disabled, not disabled), so a
+    // keyboard user's focus isn't dropped while the page loads.
+    for (const name of ["Previous", "Next"]) {
+      const control = screen.getByRole("button", { name });
+      expect(control).toHaveAttribute("aria-disabled", "true");
+      expect(control).not.toBeDisabled();
+    }
+  });
+});
+
+// The pager's own behavior is client/src/Pager.test.tsx; these check the page
+// wires it to the URL and the request, keeping the sort and filter.
+describe("TicketsPage pager", () => {
+  // 200 tickets: 8 pages, so pages hide behind an ellipsis and jump-to-page shows.
+  const eightPages = (page: number) => ({
+    status: 200,
+    data: pageOf([ticket(1000 + page)], page, 200),
+  });
+  const pagerButton = (name: string) =>
+    within(screen.getByRole("navigation", { name: "Ticket pages" })).getByRole("button", { name });
+
+  test("a page number goes to that page, keeping the sort and filter", async () => {
+    respond = eightPages;
+    const user = userEvent.setup();
+    renderAt("/tickets?sort=subject&order=asc&category=refund_request");
+    await screen.findByRole("cell", { name: "#1001" });
+
+    await user.click(pagerButton("Page 3"));
+    await screen.findByRole("cell", { name: "#1003" });
+    expect(locationSearch()).toBe("?page=3&sort=subject&order=asc&category=refund_request");
+    expect(currentPage()).toBe("3");
+    expect(requestedQueries().at(-1)).toEqual({
+      page: 3,
+      sort: TicketSortField.subject,
+      order: SortOrder.asc,
+    });
+    expect(requestedCategories().at(-1)).toBe(TicketCategory.refund_request);
+  });
+
+  test("Last goes to the final page, and First back to the bare URL", async () => {
+    respond = eightPages;
+    const user = userEvent.setup();
+    renderAt();
+    await screen.findByRole("cell", { name: "#1001" });
+
+    await user.click(pagerButton("Last"));
+    await screen.findByRole("cell", { name: "#1008" });
+    expect(locationSearch()).toBe("?page=8");
+    expect(screen.getByText("Showing 176–176 of 200")).toBeTruthy();
+
+    await user.click(pagerButton("First"));
+    await screen.findByRole("cell", { name: "#1001" });
+    expect(locationSearch()).toBe("");
+  });
+
+  test("jump to page lands on the page typed", async () => {
+    respond = eightPages;
+    const user = userEvent.setup();
+    renderAt();
+    await screen.findByRole("cell", { name: "#1001" });
+
+    await user.type(screen.getByLabelText("Go to page"), "6{Enter}");
+    await screen.findByRole("cell", { name: "#1006" });
+    expect(locationSearch()).toBe("?page=6");
+    expect(currentPage()).toBe("6");
+  });
+
+  test("a single page shows the range but no pager", async () => {
+    respond = () => ({ status: 200, data: pageOf([ticket(1)], 1, 1) });
+    renderAt();
+    await screen.findByRole("cell", { name: "#1" });
+
+    expect(screen.getByText("Showing 1–1 of 1")).toBeTruthy();
+    expect(screen.queryByRole("navigation", { name: "Ticket pages" })).toBeNull();
   });
 });
