@@ -90,7 +90,7 @@ export const inboundEmailSchema = z.object({
 export type InboundEmailInput = z.infer<typeof inboundEmailSchema>;
 
 /** How many tickets one page of GET /api/tickets holds. */
-export const TICKETS_PAGE_SIZE = 25;
+export const TICKETS_PAGE_SIZE = 10;
 
 // Far beyond any real ticket count, but it keeps the offset the server computes
 // from (page - 1) * TICKETS_PAGE_SIZE a sane number.

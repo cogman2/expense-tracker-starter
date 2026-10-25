@@ -4,6 +4,7 @@ import {
   TicketCategory,
   TicketSortField,
   TicketStatus,
+  TICKETS_PAGE_SIZE,
   type SortOrderValue,
   type TicketCategoryValue,
   type TicketSortFieldValue,
@@ -17,7 +18,6 @@ import { buildEmail, createTicket, uid } from "./inbound-helpers";
 // asserts absolute totals or exact page contents: tickets carry unique subjects
 // and are found by them, and ordering is checked relatively.
 const SERVER_URL = "http://localhost:3000";
-const PAGE_SIZE = 25;
 
 // Paging through the UI and the home page's Tickets link are unit-tested
 // (client/src/TicketsPage.test.tsx, client/src/HomePage.test.tsx), and the page
@@ -112,14 +112,14 @@ test.describe("GET /api/tickets", () => {
     expect(res.status).toBe(401);
   });
 
-  test("an agent gets page 1, 25 per page, with a new ticket's fields", async () => {
+  test("an agent gets page 1, a page at a time, with a new ticket's fields", async () => {
     const created = await newTicket();
     const res = await listTickets(await agentCookie());
     expect(res.status).toBe(200);
     const body = (await res.json()) as TicketList;
     expect(body.page).toBe(1);
-    expect(body.pageSize).toBe(PAGE_SIZE);
-    expect(body.tickets.length).toBeLessThanOrEqual(PAGE_SIZE);
+    expect(body.pageSize).toBe(TICKETS_PAGE_SIZE);
+    expect(body.tickets.length).toBeLessThanOrEqual(TICKETS_PAGE_SIZE);
     expect(body.total).toBeGreaterThanOrEqual(body.tickets.length);
 
     const row = body.tickets.find((t) => t.id === created.id);
