@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
-import { TicketStatus } from "core";
+import { SortOrder, TICKETS_PAGE_SIZE, TicketSortField, TicketStatus } from "core";
 import { AGENT, loginAndWaitForHome } from "./auth-helpers";
+import { db } from "./db";
 import { buildEmail, createTicket, send, uid } from "./inbound-helpers";
 
 // Rendering, 404/error states and the back-link round trip are unit-tested in
@@ -109,13 +110,19 @@ test.describe("GET /api/tickets/:id", () => {
 test.describe("Ticket detail page (agent)", () => {
   test("clicking a ticket's subject on the list opens its detail page", async ({ page }) => {
     const tag = uid();
-    // Sorts first by subject, so parallel specs adding tickets cannot push it off page 1.
-    const subject = `AAA Open ${tag}`;
+    const subject = `Open ${tag}`;
     const text = `Body for ${tag}`;
     const { ticketId } = await createTicket({ subject, text });
 
+    // Oldest id first, the ticket's page is fixed: ids never change and no spec
+    // deletes tickets, so parallel specs only add tickets after it.
+    const before = await db.ticket.count({ where: { id: { lt: ticketId } } });
+    const listPage = Math.floor(before / TICKETS_PAGE_SIZE) + 1;
+
     await loginAndWaitForHome(page, AGENT.email, AGENT.password);
-    await page.goto("/tickets?sort=subject&order=asc");
+    await page.goto(
+      `/tickets?sort=${TicketSortField.id}&order=${SortOrder.asc}&page=${listPage}`,
+    );
     await page.getByRole("link", { name: subject }).click();
 
     await expect(page).toHaveURL(`/tickets/${ticketId}`);
