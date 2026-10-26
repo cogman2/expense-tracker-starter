@@ -32,6 +32,15 @@ describe("ticketOrderBy", () => {
     }
   });
 
+  test("assignee sorts by the assignee's name, then id", () => {
+    for (const order of SORT_ORDERS) {
+      expect(ticketOrderBy(TicketSortField.assignee, order)).toEqual([
+        { assignee: { name: order } },
+        { id: order },
+      ]);
+    }
+  });
+
   test("category sorts with uncategorized tickets last, then id", () => {
     for (const order of SORT_ORDERS) {
       expect(ticketOrderBy(TicketSortField.category, order)).toEqual([

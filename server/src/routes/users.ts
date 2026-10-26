@@ -147,8 +147,9 @@ usersRouter.patch("/api/users/:id", requireAuth, requireAdmin, async (req, res) 
 // Admin-only soft delete. The row is kept with deletedAt set — its email stays
 // taken, so the create route's duplicate check still refuses it — and every
 // session it holds is revoked, so the user is signed out at once; the session
-// hook in ../auth.ts keeps them from signing back in. Admin accounts cannot be
-// deleted at all, which also rules out deleting yourself.
+// hook in ../auth.ts keeps them from signing back in. Any tickets assigned to
+// them become unassigned. Admin accounts cannot be deleted at all, which also
+// rules out deleting yourself.
 usersRouter.delete("/api/users/:id", requireAuth, requireAdmin, async (req, res) => {
   const target = await prisma.user.findUnique({
     where: { id: req.params.id },
@@ -164,10 +165,18 @@ usersRouter.delete("/api/users/:id", requireAuth, requireAdmin, async (req, res)
     return;
   }
 
-  await prisma.user.update({
-    where: { id: target.id },
-    data: { deletedAt: new Date() },
-  });
+  // Their tickets go back to unassigned in the same transaction: a deleted user
+  // is hidden from the API, so they could neither be shown nor reassigned from.
+  await prisma.$transaction([
+    prisma.user.update({
+      where: { id: target.id },
+      data: { deletedAt: new Date() },
+    }),
+    prisma.ticket.updateMany({
+      where: { assigneeId: target.id },
+      data: { assigneeId: null },
+    }),
+  ]);
   const ctx = await auth.$context;
   await ctx.internalAdapter.deleteUserSessions(target.id);
 

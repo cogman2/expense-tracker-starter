@@ -14,6 +14,9 @@ type TicketOrderBy = Prisma.TicketOrderByWithRelationInput;
  * `customer` sorts as the list shows it — by name, then by address. Customers
  * who never gave a name sort last in both directions rather than bunching at
  * one end; uncategorized tickets sort last under `category` the same way.
+ * `assignee` sorts by the assignee's name, but Prisma offers no `nulls` option
+ * for a required field reached through an optional relation, so unassigned
+ * tickets take Postgres's default: last A→Z, first Z→A.
  * `status` and `category` follow their Postgres enums' declaration order —
  * open → resolved → closed for status, i.e. workflow order, not alphabetical.
  */
@@ -34,6 +37,8 @@ export function ticketOrderBy(
       ];
     case TicketSortField.category:
       return [{ category: { sort: order, nulls: "last" } }, tieBreak];
+    case TicketSortField.assignee:
+      return [{ assignee: { name: order } }, tieBreak];
     case TicketSortField.subject:
     case TicketSortField.status:
     case TicketSortField.createdAt:

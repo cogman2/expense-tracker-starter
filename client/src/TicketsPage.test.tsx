@@ -19,6 +19,7 @@ const ticket = (id: number, overrides: Partial<TicketRow> = {}): TicketRow => ({
   category: null,
   createdAt: "2026-10-01T12:00:00.000Z",
   customer: { name: `Customer ${id}`, email: `c${id}@example.com` },
+  assignee: null,
   ...overrides,
 });
 
@@ -89,7 +90,7 @@ const header = (name: string) => screen.getByRole("columnheader", { name });
 const sortButton = (name: string) => screen.getByRole("button", { name });
 
 describe("TicketsPage", () => {
-  test("shows each ticket's number, subject, customer, status, category and date", async () => {
+  test("shows each ticket's number, subject, customer, status, category, assignee and date", async () => {
     respond = () => ({
       status: 200,
       data: pageOf(
@@ -97,6 +98,7 @@ describe("TicketsPage", () => {
           ticket(42, {
             status: TicketStatus.resolved,
             category: TicketCategory.refund_request,
+            assignee: { id: "u1", name: "Alex Admin" },
           }),
           ticket(41),
         ],
@@ -114,8 +116,12 @@ describe("TicketsPage", () => {
       "Customer 42",
       TicketStatus.resolved,
       "Refund Request",
+      "Alex Admin",
       new Date("2026-10-01T12:00:00.000Z").toLocaleDateString(),
     ]);
+    // Unassigned reads as a dash.
+    const unassigned = screen.getByRole("cell", { name: "#41" }).closest("tr")!;
+    expect(within(unassigned).getAllByRole("cell")[5]).toHaveTextContent("—");
     expect(requestedPages()).toEqual([["/api/tickets", 1]]);
   });
 
@@ -257,7 +263,7 @@ describe("TicketsPage sorting", () => {
       { page: 1, sort: TicketSortField.createdAt, order: SortOrder.desc },
     ]);
     expect(header("Created")).toHaveAttribute("aria-sort", "descending");
-    for (const name of ["Ticket #", "Subject", "Customer", "Status", "Category"]) {
+    for (const name of ["Ticket #", "Subject", "Customer", "Status", "Category", "Assignee"]) {
       expect(header(name)).toHaveAttribute("aria-sort", "none");
     }
     expect(locationSearch()).toBe("");
@@ -394,6 +400,7 @@ describe("TicketsPage sorting — first clicks, loading and edge cases", () => {
       "Customer",
       "Status",
       "Category",
+      "Assignee",
       "Created",
     ]);
     for (const h of headers) {
@@ -401,7 +408,7 @@ describe("TicketsPage sorting — first clicks, loading and edge cases", () => {
     }
   });
 
-  test("Customer, Status and Category sort A→Z on their first click", async () => {
+  test("Customer, Status, Category and Assignee sort A→Z on their first click", async () => {
     respond = onePage;
     const user = userEvent.setup();
     renderAt();
@@ -419,6 +426,10 @@ describe("TicketsPage sorting — first clicks, loading and edge cases", () => {
     await user.click(sortButton("Category"));
     expect(locationSearch()).toBe("?sort=category&order=asc");
     expect(header("Category")).toHaveAttribute("aria-sort", "ascending");
+
+    await user.click(sortButton("Assignee"));
+    expect(locationSearch()).toBe("?sort=assignee&order=asc");
+    expect(header("Assignee")).toHaveAttribute("aria-sort", "ascending");
   });
 
   test("clicking the already-sorted Created header flips to oldest first", async () => {

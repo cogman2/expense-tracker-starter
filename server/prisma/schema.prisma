@@ -36,6 +36,10 @@ model User {
 
   sessions Session[]
   accounts Account[]
+
+  // Tickets this user is working. Unassigned when the user is soft-deleted
+  // (src/routes/users.ts), since deleted users are hidden from the API.
+  assignedTickets Ticket[] @relation("TicketAssignee")
 }
 
 model Session {
@@ -112,6 +116,9 @@ model Ticket {
   category   TicketCategory? // null until someone categorizes the ticket
   customerId String
   customer   Customer        @relation(fields: [customerId], references: [id])
+  // The staff user working the ticket; null while nobody has picked it up.
+  assigneeId String?
+  assignee   User?           @relation("TicketAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
   createdAt  DateTime        @default(now())
   updatedAt  DateTime        @updatedAt
 
@@ -120,6 +127,7 @@ model Ticket {
   @@index([status, createdAt])
   @@index([createdAt]) // the ticket list's newest-first sort
   @@index([category, createdAt]) // ?category= filtering (and its count), newest first
+  @@index([assigneeId]) // unassigning a deleted user's tickets
 }
 
 // One email in a ticket's thread. messageId is the RFC 5322 Message-ID (without

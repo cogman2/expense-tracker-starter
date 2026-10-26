@@ -162,3 +162,20 @@ export const ticketIdParamSchema = z.coerce
   .max(MAX_TICKET_ID, TICKET_ID_MESSAGE);
 
 export type TicketIdParam = z.infer<typeof ticketIdParamSchema>;
+
+const ASSIGNEE_MESSAGE = "assigneeId must be a user id or null";
+
+/**
+ * The PATCH /api/tickets/:id payload: who works the ticket. `null` unassigns it,
+ * so the field is required — a missing one is an error, not "no change". The
+ * server also checks the id names an active user; that needs the database.
+ */
+export const assignTicketSchema = z.object({
+  assigneeId: z
+    .string({ error: ASSIGNEE_MESSAGE })
+    .trim()
+    .min(1, ASSIGNEE_MESSAGE)
+    .nullable(),
+});
+
+export type AssignTicketInput = z.infer<typeof assignTicketSchema>;

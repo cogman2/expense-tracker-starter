@@ -2,6 +2,7 @@
 // (Better Auth is the exception — it ships its own fetch layer, see auth-client).
 import axios from "axios";
 import type {
+  AssignTicketInput,
   CreateUserInput,
   SortOrderValue,
   TicketCategoryValue,
@@ -92,6 +93,12 @@ export async function deleteUser(id: string, signal?: AbortSignal): Promise<void
   await api.delete(`/api/users/${id}`, { signal });
 }
 
+/** The staff user working a ticket — only what showing and picking them needs. */
+export interface TicketAssignee {
+  id: string;
+  name: string;
+}
+
 export interface TicketRow {
   id: number;
   subject: string;
@@ -100,6 +107,8 @@ export interface TicketRow {
   category: TicketCategoryValue | null;
   createdAt: string;
   customer: { name: string | null; email: string };
+  /** Null while nobody has picked the ticket up. */
+  assignee: TicketAssignee | null;
 }
 
 /** One page of the ticket list, filtered and ordered as the server was asked. */
@@ -150,6 +159,29 @@ export async function getTicket(id: number, signal?: AbortSignal): Promise<Ticke
     signal,
   });
   return data.ticket;
+}
+
+// Every active staff user a ticket can be assigned to, by name.
+export async function getAssignees(signal?: AbortSignal): Promise<TicketAssignee[]> {
+  const { data } = await api.get<{ assignees: TicketAssignee[] }>(
+    "/api/tickets/assignees",
+    { signal },
+  );
+  return data.assignees;
+}
+
+// Assigns a ticket, or unassigns it with null. Answers with the new assignee.
+export async function assignTicket(
+  id: number,
+  input: AssignTicketInput,
+  signal?: AbortSignal,
+): Promise<TicketAssignee | null> {
+  const { data } = await api.patch<{ ticket: { id: number; assignee: TicketAssignee | null } }>(
+    `/api/tickets/${id}`,
+    input,
+    { signal },
+  );
+  return data.ticket.assignee;
 }
 
 // Surfaces the server's `{ error }` message from a failed response, falling back

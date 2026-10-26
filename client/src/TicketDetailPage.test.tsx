@@ -1,11 +1,12 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { cleanup, screen, within } from "@testing-library/react";
+import { cleanup, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { TicketCategory, TicketStatus } from "core";
 import { renderWithQuery } from "./testRender";
 import { fakeHttp, httpCalls, restoreHttp, type FakeResponse } from "./testHttp";
 import { TicketDetailPage } from "./TicketDetailPage";
-import type { TicketDetail } from "./lib/api";
+import type { TicketAssignee, TicketDetail } from "./lib/api";
 
 // Runs against the real lib/api module; only the network is faked, so these
 // specs also cover getTicket's URL.
@@ -17,6 +18,7 @@ const detail = (overrides: Partial<TicketDetail> = {}): TicketDetail => ({
   category: TicketCategory.technical_question,
   createdAt: "2026-10-01T12:00:00.000Z",
   customer: { name: "Jane Doe", email: "jane@example.com" },
+  assignee: null,
   messages: [
     {
       id: "m1",
@@ -38,12 +40,37 @@ const detail = (overrides: Partial<TicketDetail> = {}): TicketDetail => ({
   ...overrides,
 });
 
+const ALEX: TicketAssignee = { id: "u1", name: "Alex Admin" };
+const SAM: TicketAssignee = { id: "u2", name: "Sam Agent" };
+
+/** Answers GET /api/tickets/:id. */
 let respond: () => FakeResponse;
+/** Answers GET /api/tickets/assignees. */
+let respondAssignees: () => FakeResponse;
+/** Answers PATCH /api/tickets/:id, given the body sent. */
+let respondAssign: (body: { assigneeId: string | null }) => FakeResponse;
 
 beforeEach(() => {
   respond = () => ({ status: 200, data: { ticket: detail() } });
-  fakeHttp(() => respond());
+  respondAssignees = () => ({ status: 200, data: { assignees: [ALEX, SAM] } });
+  respondAssign = ({ assigneeId }) => ({
+    status: 200,
+    data: { ticket: { id: 42, assignee: [ALEX, SAM].find((a) => a.id === assigneeId) ?? null } },
+  });
+  fakeHttp((config) => {
+    if (config.method === "patch") return respondAssign(JSON.parse(config.data));
+    if (config.url === "/api/tickets/assignees") return respondAssignees();
+    return respond();
+  });
 });
+
+/** The PATCH bodies sent, in order. */
+const assignBodies = () =>
+  httpCalls()
+    .filter((call) => call.method === "patch")
+    .map((call) => [call.url, JSON.parse(call.data)]);
+
+const assigneeSelect = () => screen.findByRole("combobox", { name: "Assignee" });
 
 afterEach(() => {
   cleanup();
@@ -65,7 +92,7 @@ describe("TicketDetailPage", () => {
     renderAt();
 
     expect(await screen.findByRole("heading", { name: "Can't log in" })).toBeInTheDocument();
-    expect(httpCalls().map((call) => call.url)).toEqual(["/api/tickets/42"]);
+    expect(httpCalls()[0]?.url).toBe("/api/tickets/42");
     for (const text of ["#42", TicketStatus.open, "Technical Question", "Jane Doe", "jane@example.com"]) {
       expect(screen.getAllByText(text).length).toBeGreaterThan(0);
     }
@@ -129,5 +156,76 @@ describe("TicketDetailPage", () => {
       "href",
       "/tickets",
     );
+  });
+});
+
+describe("TicketDetailPage assignment", () => {
+  test("shows who the ticket is assigned to, or Unassigned", async () => {
+    respond = () => ({ status: 200, data: { ticket: detail({ assignee: SAM }) } });
+    renderAt();
+
+    expect(await assigneeSelect()).toHaveDisplayValue("Sam Agent");
+    const options = within(await assigneeSelect()).getAllByRole("option");
+    expect(options.map((o) => o.textContent)).toEqual(["Unassigned", "Alex Admin", "Sam Agent"]);
+  });
+
+  test("picking someone assigns the ticket to them", async () => {
+    const user = userEvent.setup();
+    // Like the real server, later reads see the assignment: saving refetches.
+    let assignee: TicketAssignee | null = null;
+    respond = () => ({ status: 200, data: { ticket: detail({ assignee }) } });
+    respondAssign = () => {
+      assignee = ALEX;
+      return { status: 200, data: { ticket: { id: 42, assignee } } };
+    };
+    renderAt();
+
+    const select = await assigneeSelect();
+    expect(select).toHaveDisplayValue("Unassigned");
+    await user.selectOptions(select, "Alex Admin");
+
+    await waitFor(() => expect(select).toHaveDisplayValue("Alex Admin"));
+    expect(assignBodies()).toEqual([["/api/tickets/42", { assigneeId: ALEX.id }]]);
+  });
+
+  test("Unassigned sends null", async () => {
+    const user = userEvent.setup();
+    respond = () => ({ status: 200, data: { ticket: detail({ assignee: ALEX }) } });
+    renderAt();
+
+    await user.selectOptions(await assigneeSelect(), "Unassigned");
+
+    expect(assignBodies()).toEqual([["/api/tickets/42", { assigneeId: null }]]);
+  });
+
+  test("disables the picker while saving", async () => {
+    const user = userEvent.setup();
+    respondAssign = () => ({ status: 200, pending: true });
+    renderAt();
+
+    await user.selectOptions(await assigneeSelect(), "Sam Agent");
+
+    expect(await assigneeSelect()).toBeDisabled();
+  });
+
+  test("shows the server's message when assigning fails", async () => {
+    const user = userEvent.setup();
+    respondAssign = () => ({ status: 400, data: { error: "assignee must be an active user" } });
+    renderAt();
+
+    await user.selectOptions(await assigneeSelect(), "Sam Agent");
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("assignee must be an active user");
+    expect(await assigneeSelect()).toHaveDisplayValue("Unassigned");
+  });
+
+  test("reads as text when the staff list cannot load", async () => {
+    respond = () => ({ status: 200, data: { ticket: detail({ assignee: SAM }) } });
+    respondAssignees = () => ({ status: 400, data: { error: "boom" } });
+    renderAt();
+
+    await screen.findByRole("heading", { name: "Can't log in" });
+    expect(await screen.findByText("Sam Agent")).toBeInTheDocument();
+    expect(screen.queryByRole("combobox")).toBeNull();
   });
 });

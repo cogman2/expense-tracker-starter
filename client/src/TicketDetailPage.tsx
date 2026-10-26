@@ -1,9 +1,17 @@
-import type { ReactNode } from "react";
+import { useId, type ReactNode } from "react";
 import { Link, useLocation, useParams } from "react-router";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { TICKET_CATEGORY_LABELS, ticketIdParamSchema } from "core";
 import { Skeleton } from "@/components/ui/skeleton";
-import { getTicket, isNotFound, type TicketDetail, type TicketMessage } from "@/lib/api";
+import {
+  apiErrorMessage,
+  assignTicket,
+  getAssignees,
+  getTicket,
+  isNotFound,
+  type TicketDetail,
+  type TicketMessage,
+} from "@/lib/api";
 import { queryKeys } from "@/lib/queryKeys";
 
 /**
@@ -56,6 +64,73 @@ function Message({ message }: { message: TicketMessage }) {
   );
 }
 
+/** The select's value for "nobody"; user ids are never empty. */
+const UNASSIGNED = "";
+
+/**
+ * Who works the ticket, changeable by any signed-in user. Saves on change; the
+ * select is disabled until the server answers, and a refusal shows its message.
+ * Without the staff list there is nothing to pick from, so it reads as text.
+ */
+function AssigneeDetail({ ticket }: { ticket: TicketDetail }) {
+  const selectId = useId();
+  const queryClient = useQueryClient();
+  const assignees = useQuery({
+    queryKey: queryKeys.tickets.assignees,
+    queryFn: ({ signal }) => getAssignees(signal),
+  });
+  const assign = useMutation({
+    mutationFn: (assigneeId: string | null) => assignTicket(ticket.id, { assigneeId }),
+    onSuccess: (assignee) => {
+      queryClient.setQueryData<TicketDetail>(queryKeys.tickets.detail(ticket.id), (old) =>
+        old ? { ...old, assignee } : old,
+      );
+      // The list shows assignees too, and sorts by them.
+      void queryClient.invalidateQueries({ queryKey: queryKeys.tickets.all });
+    },
+  });
+
+  if (!assignees.data) {
+    return <Detail label="Assignee">{ticket.assignee?.name ?? "Unassigned"}</Detail>;
+  }
+  // Keep the current assignee selectable even if the staff list predates them.
+  const options =
+    ticket.assignee && !assignees.data.some((a) => a.id === ticket.assignee!.id)
+      ? [ticket.assignee, ...assignees.data]
+      : assignees.data;
+
+  return (
+    <div>
+      <dt className="text-gray-500">
+        <label htmlFor={selectId}>Assignee</label>
+      </dt>
+      <dd className="mt-0.5">
+        <select
+          id={selectId}
+          className="w-full max-w-48 rounded-md border border-gray-300 px-2 py-1 disabled:opacity-60"
+          value={ticket.assignee?.id ?? UNASSIGNED}
+          disabled={assign.isPending}
+          onChange={(event) =>
+            assign.mutate(event.target.value === UNASSIGNED ? null : event.target.value)
+          }
+        >
+          <option value={UNASSIGNED}>Unassigned</option>
+          {options.map((assignee) => (
+            <option key={assignee.id} value={assignee.id}>
+              {assignee.name}
+            </option>
+          ))}
+        </select>
+        {assign.isError && (
+          <p role="alert" className="mt-1 text-red-600">
+            {apiErrorMessage(assign.error, "Could not assign the ticket.")}
+          </p>
+        )}
+      </dd>
+    </div>
+  );
+}
+
 function TicketView({ ticket }: { ticket: TicketDetail }) {
   return (
     <>
@@ -76,6 +151,7 @@ function TicketView({ ticket }: { ticket: TicketDetail }) {
             ticket.customer.email
           )}
         </Detail>
+        <AssigneeDetail ticket={ticket} />
         <Detail label="Created">{formatDate(ticket.createdAt)}</Detail>
       </dl>
 

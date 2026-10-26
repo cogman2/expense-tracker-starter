@@ -60,6 +60,7 @@ export const TICKET_SORT_FIELDS = [
   "customer",
   "status",
   "category",
+  "assignee",
   "createdAt",
 ] as const;
 
@@ -72,6 +73,7 @@ export const TicketSortField = {
   customer: "customer",
   status: "status",
   category: "category",
+  assignee: "assignee",
   createdAt: "createdAt",
 } as const satisfies { [F in TicketSortFieldValue]: F };
 

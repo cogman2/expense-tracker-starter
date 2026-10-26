@@ -59,7 +59,7 @@ const COLUMNS = column.columns([
     header: "Ticket #",
     cell: (info) => `#${info.getValue()}`,
     sortDescFirst: true,
-    meta: { width: "w-[9%]", bar: "w-10" },
+    meta: { width: "w-[8%]", bar: "w-10" },
   }),
   // Opens the ticket's own page (client/src/TicketDetailPage.tsx).
   column.accessor("subject", {
@@ -67,19 +67,19 @@ const COLUMNS = column.columns([
     header: "Subject",
     cell: (info) => <SubjectLink id={info.row.original.id} subject={info.getValue()} />,
     sortDescFirst: false,
-    meta: { width: "w-[30%]", bar: "w-48" },
+    meta: { width: "w-[26%]", bar: "w-48" },
   }),
   column.accessor(customerLabel, {
     id: TicketSortField.customer,
     header: "Customer",
     sortDescFirst: false,
-    meta: { width: "w-[20%]", bar: "w-32" },
+    meta: { width: "w-[18%]", bar: "w-32" },
   }),
   column.accessor("status", {
     id: TicketSortField.status,
     header: "Status",
     sortDescFirst: false,
-    meta: { width: "w-[10%]", bar: "w-14" },
+    meta: { width: "w-[9%]", bar: "w-14" },
   }),
   // Shown by its display label; uncategorized (null) reads as a dash.
   column.accessor("category", {
@@ -90,14 +90,22 @@ const COLUMNS = column.columns([
       return category ? TICKET_CATEGORY_LABELS[category] : "—";
     },
     sortDescFirst: false,
-    meta: { width: "w-[17%]", bar: "w-24" },
+    meta: { width: "w-[14%]", bar: "w-24" },
+  }),
+  // Who is working the ticket; unassigned reads as a dash, like uncategorized.
+  column.accessor((ticket) => ticket.assignee?.name ?? null, {
+    id: TicketSortField.assignee,
+    header: "Assignee",
+    cell: (info) => info.getValue() ?? "—",
+    sortDescFirst: false,
+    meta: { width: "w-[13%]", bar: "w-20" },
   }),
   column.accessor("createdAt", {
     id: TicketSortField.createdAt,
     header: "Created",
     cell: (info) => formatCreated(info.getValue()),
     sortDescFirst: true,
-    meta: { width: "w-[14%]", bar: "w-20" },
+    meta: { width: "w-[12%]", bar: "w-20" },
   }),
 ]);
 
@@ -197,11 +205,11 @@ function TicketsTableFrame({
   children: ReactNode;
 }) {
   return (
-    // min-w keeps six fixed-width columns readable on a phone: below 44rem the
+    // min-w keeps seven fixed-width columns readable on a phone: below 50rem the
     // table scrolls sideways inside this wrapper instead of squeezing to the
     // screen and breaking words mid-way ("Thomp/son"). Wider screens unchanged.
     <div className="max-w-4xl overflow-x-auto">
-      <table className="w-full min-w-[44rem] table-fixed border-collapse text-left text-sm">
+      <table className="w-full min-w-[50rem] table-fixed border-collapse text-left text-sm">
         <colgroup>
           {table.getAllLeafColumns().map((col) => (
             <col key={col.id} className={col.columnDef.meta?.width} />

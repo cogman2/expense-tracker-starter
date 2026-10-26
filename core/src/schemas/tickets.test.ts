@@ -8,6 +8,7 @@ import {
   TicketSortField,
 } from "../constants/tickets";
 import {
+  assignTicketSchema,
   inboundEmailSchema,
   NO_SUBJECT,
   ticketIdParamSchema,
@@ -145,7 +146,7 @@ describe("ticketListQuerySchema", () => {
     for (const sort of ["bogus", "", "createdat", "customer.name"]) {
       const parsed = ticketListQuerySchema.safeParse({ sort });
       expect(parsed.error?.issues[0]?.message).toBe(
-        "sort must be one of: id, subject, customer, status, category, createdAt",
+        "sort must be one of: id, subject, customer, status, category, assignee, createdAt",
       );
     }
   });
@@ -160,7 +161,7 @@ describe("ticketListQuerySchema", () => {
   test("reports the sort before the order when both are invalid", () => {
     const parsed = ticketListQuerySchema.safeParse({ sort: "bogus", order: "up" });
     expect(parsed.error?.issues[0]?.message).toBe(
-      "sort must be one of: id, subject, customer, status, category, createdAt",
+      "sort must be one of: id, subject, customer, status, category, assignee, createdAt",
     );
   });
 
@@ -204,7 +205,7 @@ describe("ticketListQuerySchema", () => {
   test("reports the sort before a filter when both are invalid", () => {
     const parsed = ticketListQuerySchema.safeParse({ sort: "bogus", category: "bogus" });
     expect(parsed.error?.issues[0]?.message).toBe(
-      "sort must be one of: id, subject, customer, status, category, createdAt",
+      "sort must be one of: id, subject, customer, status, category, assignee, createdAt",
     );
   });
 
@@ -232,6 +233,20 @@ describe("ticketIdParamSchema", () => {
       expect(parsed.error?.issues[0]?.message).toBe(
         "ticket id must be a whole number of 1 or more",
       );
+    }
+  });
+});
+
+describe("assignTicketSchema", () => {
+  test("takes a user id, trimmed, or null to unassign", () => {
+    expect(assignTicketSchema.parse({ assigneeId: " u1 " })).toEqual({ assigneeId: "u1" });
+    expect(assignTicketSchema.parse({ assigneeId: null })).toEqual({ assigneeId: null });
+  });
+
+  test("rejects a missing, blank or non-string assignee", () => {
+    for (const body of [{}, { assigneeId: "" }, { assigneeId: "  " }, { assigneeId: 7 }]) {
+      const parsed = assignTicketSchema.safeParse(body);
+      expect(parsed.error?.issues[0]?.message).toBe("assigneeId must be a user id or null");
     }
   });
 });

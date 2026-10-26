@@ -2,7 +2,12 @@
 // (./webhooks.ts); this is how agents see them. Every signed-in user may read
 // it — working tickets is the agent's job — so only requireAuth guards it.
 import express from "express";
-import { TICKETS_PAGE_SIZE, ticketIdParamSchema, ticketListQuerySchema } from "core";
+import {
+  TICKETS_PAGE_SIZE,
+  assignTicketSchema,
+  ticketIdParamSchema,
+  ticketListQuerySchema,
+} from "core";
 import { prisma } from "../db";
 import { pageWindow } from "../pagination";
 import { requireAuth } from "../require-auth";
@@ -11,6 +16,10 @@ import { activeFilters, ticketWhere } from "../ticket-filters";
 import { ticketOrderBy } from "../ticket-sort";
 
 export const ticketsRouter = express.Router();
+
+// What every ticket payload says about its assignee: enough to show and pick
+// them, never their email or role.
+const ASSIGNEE_SELECT = { select: { id: true, name: true } } as const;
 
 // One page at a time, narrowed by any filters (?category=…, from core's
 // TICKET_FILTERS) and in the order ?sort=&order= ask for (newest first when
@@ -45,6 +54,7 @@ ticketsRouter.get("/api/tickets", requireAuth, async (req, res, next) => {
           category: true,
           createdAt: true,
           customer: { select: { name: true, email: true } },
+          assignee: ASSIGNEE_SELECT,
         },
       }),
       prisma.ticket.count({ where }),
@@ -59,6 +69,22 @@ ticketsRouter.get("/api/tickets", requireAuth, async (req, res, next) => {
       order,
       filters,
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// The staff a ticket can be assigned to: every active user, admin or agent, by
+// name. Registered before /api/tickets/:id, which would otherwise take
+// "assignees" as an id and answer 400.
+ticketsRouter.get("/api/tickets/assignees", requireAuth, async (_req, res, next) => {
+  try {
+    const assignees = await prisma.user.findMany({
+      where: { deletedAt: null },
+      select: { id: true, name: true },
+      orderBy: [{ name: "asc" }, { id: "asc" }],
+    });
+    res.json({ assignees });
   } catch (err) {
     next(err);
   }
@@ -85,6 +111,7 @@ ticketsRouter.get("/api/tickets/:id", requireAuth, async (req, res, next) => {
         category: true,
         createdAt: true,
         customer: { select: { name: true, email: true } },
+        assignee: ASSIGNEE_SELECT,
         messages: {
           orderBy: { receivedAt: "asc" },
           select: {
@@ -103,6 +130,54 @@ ticketsRouter.get("/api/tickets/:id", requireAuth, async (req, res, next) => {
       return;
     }
     res.json({ ticket });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Assigns the ticket to a staff user, or unassigns it ({ assigneeId: null }).
+// Any signed-in user may, as anyone may read the list: agents pick tickets up
+// and hand them on. The assignee must be an active user — a soft-deleted one is
+// gone as far as the API is concerned.
+ticketsRouter.patch("/api/tickets/:id", requireAuth, async (req, res, next) => {
+  const id = ticketIdParamSchema.safeParse(req.params.id);
+  if (!id.success) {
+    res.status(400).json({ error: firstIssueMessage(id.error) });
+    return;
+  }
+  const body = assignTicketSchema.safeParse(req.body);
+  if (!body.success) {
+    res.status(400).json({ error: firstIssueMessage(body.error) });
+    return;
+  }
+  const { assigneeId } = body.data;
+
+  try {
+    const ticket = await prisma.ticket.findUnique({
+      where: { id: id.data },
+      select: { id: true },
+    });
+    if (!ticket) {
+      res.status(404).json({ error: "ticket not found" });
+      return;
+    }
+    if (assigneeId !== null) {
+      const assignee = await prisma.user.findFirst({
+        where: { id: assigneeId, deletedAt: null },
+        select: { id: true },
+      });
+      if (!assignee) {
+        res.status(400).json({ error: "assignee must be an active user" });
+        return;
+      }
+    }
+
+    const updated = await prisma.ticket.update({
+      where: { id: ticket.id },
+      data: { assigneeId },
+      select: { id: true, assignee: ASSIGNEE_SELECT },
+    });
+    res.json({ ticket: updated });
   } catch (err) {
     next(err);
   }
