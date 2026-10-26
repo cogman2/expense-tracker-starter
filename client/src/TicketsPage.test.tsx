@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { cleanup, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter, useLocation } from "react-router";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router";
 import { SortOrder, TicketCategory, TicketSortField, TicketStatus } from "core";
 import { renderWithQuery } from "./testRender";
 import { fakeHttp, httpCalls, restoreHttp, type FakeResponse } from "./testHttp";
+import { TicketDetailPage } from "./TicketDetailPage";
 import { TicketsPage } from "./TicketsPage";
 import type { TicketPage, TicketRow } from "./lib/api";
 
@@ -116,6 +117,33 @@ describe("TicketsPage", () => {
       new Date("2026-10-01T12:00:00.000Z").toLocaleDateString(),
     ]);
     expect(requestedPages()).toEqual([["/api/tickets", 1]]);
+  });
+
+  test("a subject opens its ticket, and Back returns to the same page and sort", async () => {
+    const user = userEvent.setup();
+    fakeHttp((config) =>
+      config.url === "/api/tickets/42"
+        ? { status: 200, data: { ticket: { ...ticket(42), messages: [] } } }
+        : { status: 200, data: pageOf([ticket(42)], 2, 30) },
+    );
+    renderWithQuery(
+      <MemoryRouter initialEntries={["/tickets?page=2&sort=subject&order=asc"]}>
+        <Routes>
+          <Route path="/tickets" element={<TicketsPage />} />
+          <Route path="/tickets/:id" element={<TicketDetailPage />} />
+        </Routes>
+        <LocationProbe />
+      </MemoryRouter>,
+    );
+
+    const link = await screen.findByRole("link", { name: "Subject 42" });
+    expect(link).toHaveAttribute("href", "/tickets/42");
+    await user.click(link);
+    expect(await screen.findByRole("heading", { name: "Subject 42" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("link", { name: /back to tickets/i }));
+    await screen.findByRole("link", { name: "Subject 42" });
+    expect(locationSearch()).toBe("?page=2&sort=subject&order=asc");
   });
 
   test("keeps the server's order (newest first)", async () => {

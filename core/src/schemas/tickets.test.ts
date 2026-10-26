@@ -10,6 +10,7 @@ import {
 import {
   inboundEmailSchema,
   NO_SUBJECT,
+  ticketIdParamSchema,
   ticketListQuerySchema,
   type TicketListQuery,
 } from "./tickets";
@@ -217,5 +218,20 @@ describe("ticketListQuerySchema", () => {
     // @ts-expect-error — only the registry's values type-check.
     const bad: TicketListQuery = { ...query, category: "not_a_category" };
     expect(String(bad.category)).toBe("not_a_category");
+  });
+});
+
+describe("ticketIdParamSchema", () => {
+  test("coerces a numeric path param to its id", () => {
+    expect(ticketIdParamSchema.parse("42")).toBe(42);
+  });
+
+  test("rejects anything that is not a positive whole number that fits an id", () => {
+    for (const id of ["0", "-1", "1.5", "abc", "", "2147483648"]) {
+      const parsed = ticketIdParamSchema.safeParse(id);
+      expect(parsed.error?.issues[0]?.message).toBe(
+        "ticket id must be a whole number of 1 or more",
+      );
+    }
   });
 });

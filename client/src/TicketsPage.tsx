@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { useSearchParams } from "react-router";
+import { Link, useLocation, useSearchParams } from "react-router";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import {
   createColumnHelper,
@@ -26,6 +26,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { getTickets, type TicketRow } from "@/lib/api";
 import { Pager } from "./Pager";
 import { TicketFilters, type TicketFilterChange } from "./TicketFilters";
+import type { TicketLinkState } from "./TicketDetailPage";
 import { queryKeys } from "@/lib/queryKeys";
 
 const SKELETON_ROWS = 5;
@@ -60,9 +61,11 @@ const COLUMNS = column.columns([
     sortDescFirst: true,
     meta: { width: "w-[9%]", bar: "w-10" },
   }),
+  // Opens the ticket's own page (client/src/TicketDetailPage.tsx).
   column.accessor("subject", {
     id: TicketSortField.subject,
     header: "Subject",
+    cell: (info) => <SubjectLink id={info.row.original.id} subject={info.getValue()} />,
     sortDescFirst: false,
     meta: { width: "w-[30%]", bar: "w-48" },
   }),
@@ -97,6 +100,19 @@ const COLUMNS = column.columns([
     meta: { width: "w-[14%]", bar: "w-20" },
   }),
 ]);
+
+/**
+ * Links a subject to its ticket, carrying the list's query string along so the
+ * detail page's "Back to tickets" returns to this same page, sort and filter.
+ */
+function SubjectLink({ id, subject }: { id: number; subject: string }) {
+  const state: TicketLinkState = { listSearch: useLocation().search };
+  return (
+    <Link to={`/tickets/${id}`} state={state} className="hover:underline">
+      {subject}
+    </Link>
+  );
+}
 
 const cellPadding = (index: number) =>
   index === COLUMNS.length - 1 ? "py-2 break-words" : "py-2 pr-4 break-words";

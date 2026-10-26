@@ -144,3 +144,21 @@ export const ticketListQuerySchema = z.object({
 });
 
 export type TicketListQuery = z.infer<typeof ticketListQuerySchema>;
+
+const TICKET_ID_MESSAGE = "ticket id must be a whole number of 1 or more";
+
+// Ticket ids are a Postgres INTEGER (Prisma Int), so a larger number cannot name
+// a ticket — and handed to Prisma it would be a query error, not a 404.
+const MAX_TICKET_ID = 2_147_483_647;
+
+/**
+ * The :id of GET /api/tickets/:id. Path params arrive as strings, so it is
+ * coerced; anything that is not a positive whole number is a 400, not a 404.
+ */
+export const ticketIdParamSchema = z.coerce
+  .number({ error: TICKET_ID_MESSAGE })
+  .int(TICKET_ID_MESSAGE)
+  .min(1, TICKET_ID_MESSAGE)
+  .max(MAX_TICKET_ID, TICKET_ID_MESSAGE);
+
+export type TicketIdParam = z.infer<typeof ticketIdParamSchema>;

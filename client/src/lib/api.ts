@@ -129,6 +129,29 @@ export async function getTickets(
   return data;
 }
 
+/** One email in a ticket's thread. Plain text only — the server never sends HTML bodies. */
+export interface TicketMessage {
+  id: string;
+  fromEmail: string;
+  fromName: string | null;
+  subject: string;
+  bodyText: string;
+  receivedAt: string;
+}
+
+/** One ticket as its detail page shows it: the list row plus its thread, oldest first. */
+export interface TicketDetail extends TicketRow {
+  messages: TicketMessage[];
+}
+
+// 404 when no ticket has this id; callers tell that apart from other failures.
+export async function getTicket(id: number, signal?: AbortSignal): Promise<TicketDetail> {
+  const { data } = await api.get<{ ticket: TicketDetail }>(`/api/tickets/${id}`, {
+    signal,
+  });
+  return data.ticket;
+}
+
 // Surfaces the server's `{ error }` message from a failed response, falling back
 // to `fallback` for cancellations, network errors, or any response without one.
 export function apiErrorMessage(err: unknown, fallback: string): string {
@@ -143,4 +166,9 @@ export function apiErrorMessage(err: unknown, fallback: string): string {
     }
   }
   return fallback;
+}
+
+/** Whether a failed request was the server answering 404 — "no such thing", not a fault. */
+export function isNotFound(err: unknown): boolean {
+  return axios.isAxiosError(err) && err.response?.status === 404;
 }

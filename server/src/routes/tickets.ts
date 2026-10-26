@@ -2,7 +2,7 @@
 // (./webhooks.ts); this is how agents see them. Every signed-in user may read
 // it — working tickets is the agent's job — so only requireAuth guards it.
 import express from "express";
-import { TICKETS_PAGE_SIZE, ticketListQuerySchema } from "core";
+import { TICKETS_PAGE_SIZE, ticketIdParamSchema, ticketListQuerySchema } from "core";
 import { prisma } from "../db";
 import { pageWindow } from "../pagination";
 import { requireAuth } from "../require-auth";
@@ -59,6 +59,50 @@ ticketsRouter.get("/api/tickets", requireAuth, async (req, res, next) => {
       order,
       filters,
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// One ticket and its email thread, oldest message first. Same guard as the list.
+// The messages carry bodyText only: bodyHtml is untrusted inbound markup the
+// client must never render, so it stays out of the payload, as do the threading
+// headers (messageId, inReplyTo, references), which only the webhook needs.
+ticketsRouter.get("/api/tickets/:id", requireAuth, async (req, res, next) => {
+  const parsed = ticketIdParamSchema.safeParse(req.params.id);
+  if (!parsed.success) {
+    res.status(400).json({ error: firstIssueMessage(parsed.error) });
+    return;
+  }
+
+  try {
+    const ticket = await prisma.ticket.findUnique({
+      where: { id: parsed.data },
+      select: {
+        id: true,
+        subject: true,
+        status: true,
+        category: true,
+        createdAt: true,
+        customer: { select: { name: true, email: true } },
+        messages: {
+          orderBy: { receivedAt: "asc" },
+          select: {
+            id: true,
+            fromEmail: true,
+            fromName: true,
+            subject: true,
+            bodyText: true,
+            receivedAt: true,
+          },
+        },
+      },
+    });
+    if (!ticket) {
+      res.status(404).json({ error: "ticket not found" });
+      return;
+    }
+    res.json({ ticket });
   } catch (err) {
     next(err);
   }

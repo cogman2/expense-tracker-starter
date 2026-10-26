@@ -102,3 +102,20 @@ describe("/users routing", () => {
     expect(text).not.toContain("Create user");
   });
 });
+
+describe("/tickets/:id routing", () => {
+  test("renders a ticket for any signed-in user", async () => {
+    setSession({ user: { role: Role.agent, name: "Agent" } });
+    // The default fake answers 200 with no ticket in it; a 404 is the simplest
+    // real answer that proves the detail page, not the list, rendered.
+    fakeHttp(() => ({ status: 404, data: { error: "ticket not found" } }));
+    const text = await renderAt("/tickets/42");
+    expect(text).toContain("Back to tickets");
+  });
+
+  test("redirects a logged-out visitor to the login page", async () => {
+    setSession(null);
+    const text = await renderAt("/tickets/42");
+    expect(text).toContain("Sign in");
+  });
+});
