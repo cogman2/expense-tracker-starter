@@ -139,6 +139,12 @@ ticketsRouter.get("/api/tickets/:id", requireAuth, async (req, res, next) => {
 // Any signed-in user may, as anyone may read the list: agents pick tickets up
 // and hand them on. The assignee must be an active user — a soft-deleted one is
 // gone as far as the API is concerned.
+//
+// The check and the write share a transaction that holds the assignee's row
+// FOR SHARE, so they can't interleave with DELETE /api/users/:id (./users.ts):
+// a delete that started first is waited for and the user then reads as gone
+// (400); one that starts after waits for this commit, then unassigns the ticket.
+// Checked separately, a ticket could be left assigned to a deleted user.
 ticketsRouter.patch("/api/tickets/:id", requireAuth, async (req, res, next) => {
   const id = ticketIdParamSchema.safeParse(req.params.id);
   if (!id.success) {
@@ -161,22 +167,25 @@ ticketsRouter.patch("/api/tickets/:id", requireAuth, async (req, res, next) => {
       res.status(404).json({ error: "ticket not found" });
       return;
     }
-    if (assigneeId !== null) {
-      const assignee = await prisma.user.findFirst({
-        where: { id: assigneeId, deletedAt: null },
-        select: { id: true },
-      });
-      if (!assignee) {
-        res.status(400).json({ error: "assignee must be an active user" });
-        return;
-      }
-    }
 
-    const updated = await prisma.ticket.update({
-      where: { id: ticket.id },
-      data: { assigneeId },
-      select: { id: true, assignee: ASSIGNEE_SELECT },
+    const updated = await prisma.$transaction(async (tx) => {
+      if (assigneeId !== null) {
+        const active = await tx.$queryRaw<{ id: string }[]>`
+          SELECT "id" FROM "User"
+          WHERE "id" = ${assigneeId} AND "deletedAt" IS NULL
+          FOR SHARE`;
+        if (active.length === 0) return null;
+      }
+      return tx.ticket.update({
+        where: { id: ticket.id },
+        data: { assigneeId },
+        select: { id: true, assignee: ASSIGNEE_SELECT },
+      });
     });
+    if (!updated) {
+      res.status(400).json({ error: "assignee must be an active user" });
+      return;
+    }
     res.json({ ticket: updated });
   } catch (err) {
     next(err);

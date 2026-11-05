@@ -152,14 +152,16 @@ const TICKET_ID_MESSAGE = "ticket id must be a whole number of 1 or more";
 const MAX_TICKET_ID = 2_147_483_647;
 
 /**
- * The :id of GET /api/tickets/:id. Path params arrive as strings, so it is
- * coerced; anything that is not a positive whole number is a 400, not a 404.
+ * The :id of /api/tickets/:id (and the client's /tickets/:id). Path params
+ * arrive as strings; only plain decimal digits with no leading zero name a
+ * ticket, so each ticket has one URL — Number() alone would also take "0x10",
+ * "1e3", " 7" or "7.0". Anything else is a 400, not a 404.
  */
-export const ticketIdParamSchema = z.coerce
-  .number({ error: TICKET_ID_MESSAGE })
-  .int(TICKET_ID_MESSAGE)
-  .min(1, TICKET_ID_MESSAGE)
-  .max(MAX_TICKET_ID, TICKET_ID_MESSAGE);
+export const ticketIdParamSchema = z
+  .string({ error: TICKET_ID_MESSAGE })
+  .regex(/^[1-9]\d*$/, TICKET_ID_MESSAGE)
+  .transform(Number)
+  .pipe(z.number().max(MAX_TICKET_ID, TICKET_ID_MESSAGE));
 
 export type TicketIdParam = z.infer<typeof ticketIdParamSchema>;
 
@@ -169,13 +171,21 @@ const ASSIGNEE_MESSAGE = "assigneeId must be a user id or null";
  * The PATCH /api/tickets/:id payload: who works the ticket. `null` unassigns it,
  * so the field is required — a missing one is an error, not "no change". The
  * server also checks the id names an active user; that needs the database.
+ * Control characters are refused here: no user id has one, and Postgres rejects
+ * a NUL byte in a query parameter with an error rather than a miss.
  */
-export const assignTicketSchema = z.object({
-  assigneeId: z
-    .string({ error: ASSIGNEE_MESSAGE })
-    .trim()
-    .min(1, ASSIGNEE_MESSAGE)
-    .nullable(),
-});
+export const assignTicketSchema = z.object(
+  {
+    assigneeId: z
+      .string({ error: ASSIGNEE_MESSAGE })
+      .trim()
+      .min(1, ASSIGNEE_MESSAGE)
+      .regex(/^\P{Cc}+$/u, ASSIGNEE_MESSAGE)
+      .nullable(),
+  },
+  // A body that is not an object at all (an array, a bare string) gets the
+  // API's wording, not zod's.
+  { error: ASSIGNEE_MESSAGE },
+);
 
 export type AssignTicketInput = z.infer<typeof assignTicketSchema>;

@@ -208,6 +208,40 @@ test.describe("GET /api/tickets/assignees and soft-deleted users", () => {
     // The cascade is scoped to the deleted user: another assignee is untouched.
     expect(await getTicketAssignee(otherTicketId, agent)).toEqual({ id: agentId, name: AGENT.name });
   });
+
+  // Race: PATCH checks the assignee is active, then writes in a separate query; a
+  // DELETE landing in between must not leave the ticket assigned to the deleted user.
+  // Probabilistic in the failing direction only: once the server serialises
+  // check+write it cannot false-fail, but before the fix it fails with high probability.
+  test("a user deleted while being assigned never stays the assignee", async () => {
+    test.setTimeout(120_000);
+    const ROUNDS = 40;
+    const admin = await adminCookie();
+    const agent = await agentCookie();
+    const { ticketId } = await createTicket();
+    const orphaned: string[] = [];
+
+    for (let round = 0; round < ROUNDS; round++) {
+      const user = await createThrowawayUser(admin);
+      const delay = Math.random() * 6;
+      const [deleted, patched] = await Promise.all([
+        new Promise((resolve) => setTimeout(resolve, delay)).then(() => deleteUser(user.id, admin)),
+        patchTicket(ticketId, { assigneeId: user.id }, agent),
+      ]);
+      expect(deleted.status).toBe(204);
+      if (patched.status !== 200) {
+        expect(patched.status).toBe(400);
+        expect(await patched.json()).toEqual({ error: "assignee must be an active user" });
+      }
+      const assignee = await getTicketAssignee(ticketId, agent);
+      if (assignee?.id === user.id) orphaned.push(`round ${round + 1}`);
+    }
+
+    expect(
+      orphaned,
+      `${orphaned.length} of ${ROUNDS} rounds left the ticket assigned to a deleted user`,
+    ).toEqual([]);
+  });
 });
 
 test.describe("Assignee select (browser)", () => {

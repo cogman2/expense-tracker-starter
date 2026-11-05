@@ -228,9 +228,20 @@ describe("ticketIdParamSchema", () => {
   });
 
   test("rejects anything that is not a positive whole number that fits an id", () => {
-    for (const id of ["0", "-1", "1.5", "abc", "", "2147483648"]) {
+    for (const id of ["0", "-1", "1.5", "abc", "", "2147483648", undefined]) {
       const parsed = ticketIdParamSchema.safeParse(id);
       expect(parsed.error?.issues[0]?.message).toBe(
+        "ticket id must be a whole number of 1 or more",
+      );
+    }
+  });
+
+  // Number() would read each of these as an id, so /api/tickets/0x10 reached
+  // ticket 16. Only the plain decimal form names a ticket, so each has one URL.
+  test("rejects numbers Number() accepts but that aren't plain decimal ids", () => {
+    for (const id of ["0x10", "0b11", "0o7", "1e3", "+7", " 7", "7 ", "\t7", "7.0", "007"]) {
+      const parsed = ticketIdParamSchema.safeParse(id);
+      expect(parsed.error?.issues[0]?.message, JSON.stringify(id)).toBe(
         "ticket id must be a whole number of 1 or more",
       );
     }
@@ -243,8 +254,24 @@ describe("assignTicketSchema", () => {
     expect(assignTicketSchema.parse({ assigneeId: null })).toEqual({ assigneeId: null });
   });
 
-  test("rejects a missing, blank or non-string assignee", () => {
-    for (const body of [{}, { assigneeId: "" }, { assigneeId: "  " }, { assigneeId: 7 }]) {
+  // Control characters can't be in a user id, and Postgres refuses a NUL byte in
+  // a text parameter outright — the lookup would be a 500, not this 400.
+  test("rejects a missing, blank, non-string or control-character assignee", () => {
+    for (const body of [
+      {},
+      { assigneeId: "" },
+      { assigneeId: "  " },
+      { assigneeId: 7 },
+      { assigneeId: "a\u0000b" },
+      { assigneeId: "a\nb" },
+    ]) {
+      const parsed = assignTicketSchema.safeParse(body);
+      expect(parsed.error?.issues[0]?.message).toBe("assigneeId must be a user id or null");
+    }
+  });
+
+  test("answers a body that is not an object with the same message", () => {
+    for (const body of [undefined, null, [], "u1"]) {
       const parsed = assignTicketSchema.safeParse(body);
       expect(parsed.error?.issues[0]?.message).toBe("assigneeId must be a user id or null");
     }
