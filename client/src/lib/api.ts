@@ -1,0 +1,206 @@
+// The client's HTTP layer. Every call to our own Express API goes through here
+// (Better Auth is the exception — it ships its own fetch layer, see auth-client).
+import axios from "axios";
+import type {
+  AssignTicketInput,
+  CreateUserInput,
+  SortOrderValue,
+  TicketCategoryValue,
+  TicketFilterValues,
+  TicketListQuery,
+  TicketSortFieldValue,
+  TicketStatusValue,
+  UpdateUserInput,
+  UserRole,
+} from "core";
+
+// No baseURL: paths are written out in full so the Vite dev proxy rules apply as
+// written. The proxy treats them asymmetrically — `/api/users`, `/api/me` and
+// `/api/auth` are forwarded untouched, while the generic `/api` rule strips the
+// prefix (`/api/health` -> server `/health`) — so a baseURL of "/api" would
+// quietly send /health somewhere else.
+export const api = axios.create({
+  headers: { "Content-Type": "application/json" },
+  // Same-origin today, but makes the session cookie explicit: the server's
+  // requireAdmin guard authorizes off it.
+  withCredentials: true,
+});
+
+export interface ApiHealth {
+  status: "ok";
+  service: string;
+  timestamp: string;
+}
+
+export interface UserRow {
+  id: string;
+  name: string;
+  email: string;
+  role: UserRole;
+  createdAt: string;
+}
+
+// The user payloads are defined once, in the package both sides import
+// (core/src/users.ts), so this module cannot describe a body the server rejects.
+// Re-exported because callers (UsersPage, the specs) import them from here.
+export type { CreateUserInput, UpdateUserInput };
+
+// Each helper takes an optional AbortSignal. TanStack Query hands one to every
+// queryFn, so passing it through is what makes an in-flight read abort when the
+// component unmounts or a newer request supersedes it.
+export async function getHealth(signal?: AbortSignal): Promise<ApiHealth> {
+  const { data } = await api.get<ApiHealth>("/api/health", { signal });
+  return data;
+}
+
+export async function getUsers(signal?: AbortSignal): Promise<UserRow[]> {
+  const { data } = await api.get<{ users: UserRow[] }>("/api/users", { signal });
+  return data.users;
+}
+
+// The create response omits createdAt — only the list endpoint returns it.
+export async function createUser(
+  input: CreateUserInput,
+  signal?: AbortSignal,
+): Promise<Omit<UserRow, "createdAt">> {
+  const { data } = await api.post<{ user: Omit<UserRow, "createdAt"> }>(
+    "/api/users",
+    input,
+    { signal },
+  );
+  return data.user;
+}
+
+// Edits name, email and role. Like create, the response omits createdAt — only
+// the list endpoint reports it — so callers refresh the list rather than patching
+// the returned row into place.
+export async function updateUser(
+  id: string,
+  input: UpdateUserInput,
+  signal?: AbortSignal,
+): Promise<Omit<UserRow, "createdAt">> {
+  const { data } = await api.patch<{ user: Omit<UserRow, "createdAt"> }>(
+    `/api/users/${id}`,
+    input,
+    { signal },
+  );
+  return data.user;
+}
+
+// Soft-deletes a user. The server answers 204 with no body; admins cannot be
+// deleted (409).
+export async function deleteUser(id: string, signal?: AbortSignal): Promise<void> {
+  await api.delete(`/api/users/${id}`, { signal });
+}
+
+/** The staff user working a ticket — only what showing and picking them needs. */
+export interface TicketAssignee {
+  id: string;
+  name: string;
+}
+
+export interface TicketRow {
+  id: number;
+  subject: string;
+  status: TicketStatusValue;
+  /** Null until someone categorizes the ticket — inbound email arrives without one. */
+  category: TicketCategoryValue | null;
+  createdAt: string;
+  customer: { name: string | null; email: string };
+  /** Null while nobody has picked the ticket up. */
+  assignee: TicketAssignee | null;
+}
+
+/** One page of the ticket list, filtered and ordered as the server was asked. */
+export interface TicketPage {
+  tickets: TicketRow[];
+  /** Every matching ticket, not just this page's. */
+  total: number;
+  page: number;
+  pageSize: number;
+  sort: TicketSortFieldValue;
+  order: SortOrderValue;
+  /** The filters the server applied; only those present, `{}` for none. */
+  filters: TicketFilterValues;
+}
+
+// The server filters and sorts (it is the only side that sees every page), so
+// the filters and sort go out as query params alongside the page. An absent
+// filter is left out of the query string (axios drops undefined params).
+export async function getTickets(
+  query: TicketListQuery,
+  signal?: AbortSignal,
+): Promise<TicketPage> {
+  const { data } = await api.get<TicketPage>("/api/tickets", {
+    params: query,
+    signal,
+  });
+  return data;
+}
+
+/** One email in a ticket's thread. Plain text only — the server never sends HTML bodies. */
+export interface TicketMessage {
+  id: string;
+  fromEmail: string;
+  fromName: string | null;
+  subject: string;
+  bodyText: string;
+  receivedAt: string;
+}
+
+/** One ticket as its detail page shows it: the list row plus its thread, oldest first. */
+export interface TicketDetail extends TicketRow {
+  messages: TicketMessage[];
+}
+
+// 404 when no ticket has this id; callers tell that apart from other failures.
+export async function getTicket(id: number, signal?: AbortSignal): Promise<TicketDetail> {
+  const { data } = await api.get<{ ticket: TicketDetail }>(`/api/tickets/${id}`, {
+    signal,
+  });
+  return data.ticket;
+}
+
+// Every active staff user a ticket can be assigned to, by name.
+export async function getAssignees(signal?: AbortSignal): Promise<TicketAssignee[]> {
+  const { data } = await api.get<{ assignees: TicketAssignee[] }>(
+    "/api/tickets/assignees",
+    { signal },
+  );
+  return data.assignees;
+}
+
+// Assigns a ticket, or unassigns it with null. Answers with the new assignee.
+export async function assignTicket(
+  id: number,
+  input: AssignTicketInput,
+  signal?: AbortSignal,
+): Promise<TicketAssignee | null> {
+  const { data } = await api.patch<{ ticket: { id: number; assignee: TicketAssignee | null } }>(
+    `/api/tickets/${id}`,
+    input,
+    { signal },
+  );
+  return data.ticket.assignee;
+}
+
+// Surfaces the server's `{ error }` message from a failed response, falling back
+// to `fallback` for cancellations, network errors, or any response without one.
+export function apiErrorMessage(err: unknown, fallback: string): string {
+  // A cancellation is not a server error — it carries no message worth showing.
+  if (axios.isCancel(err)) {
+    return fallback;
+  }
+  if (axios.isAxiosError(err)) {
+    const data = err.response?.data as { error?: string } | undefined;
+    if (typeof data?.error === "string") {
+      return data.error;
+    }
+  }
+  return fallback;
+}
+
+/** Whether a failed request was the server answering 404 — "no such thing", not a fault. */
+export function isNotFound(err: unknown): boolean {
+  return axios.isAxiosError(err) && err.response?.status === 404;
+}
