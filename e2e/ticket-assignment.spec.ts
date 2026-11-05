@@ -78,22 +78,19 @@ test.describe("PATCH /api/tickets/:id validation", () => {
     expect(res.status).toBe(401);
   });
 
-  for (const id of ["abc", "0"]) {
-    test(`rejects ticket id "${id}" with 400`, async () => {
-      const res = await patchTicket(id, { assigneeId: null }, await agentCookie());
-      expect(res.status).toBe(400);
-      expect(await res.json()).toEqual({ error: "ticket id must be a whole number of 1 or more" });
-    });
-  }
+  // One invalid case each is enough to show the route answers with the schema's
+  // message; the rules themselves are unit-tested in core/src/schemas/tickets.test.ts.
+  test("rejects a malformed ticket id with 400", async () => {
+    const res = await patchTicket("abc", { assigneeId: null }, await agentCookie());
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "ticket id must be a whole number of 1 or more" });
+  });
 
-  test("rejects a missing, empty or non-string assigneeId with 400", async () => {
-    const cookie = await agentCookie();
+  test("rejects a missing assigneeId with 400", async () => {
     const { ticketId } = await createTicket();
-    for (const body of [{}, { assigneeId: "" }, { assigneeId: 5 }]) {
-      const res = await patchTicket(ticketId, body, cookie);
-      expect(res.status, JSON.stringify(body)).toBe(400);
-      expect(await res.json()).toEqual({ error: "assigneeId must be a user id or null" });
-    }
+    const res = await patchTicket(ticketId, {}, await agentCookie());
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "assigneeId must be a user id or null" });
   });
 
   test("rejects an unknown assignee id with 400 and leaves the ticket unassigned", async () => {
@@ -195,9 +192,12 @@ test.describe("GET /api/tickets/assignees and soft-deleted users", () => {
     const agent = await agentCookie();
     const doomed = await createThrowawayUser(admin);
     const { ticketId } = await createTicket();
+    const { ticketId: otherTicketId } = await createTicket();
+    const agentId = await seededId(AGENT.email);
 
     const assigned = await patchTicket(ticketId, { assigneeId: doomed.id }, agent);
     expect(assigned.status).toBe(200);
+    expect((await patchTicket(otherTicketId, { assigneeId: agentId }, agent)).status).toBe(200);
     expect(await getTicketAssignee(ticketId, agent)).toEqual({
       id: doomed.id,
       name: doomed.name,
@@ -205,6 +205,8 @@ test.describe("GET /api/tickets/assignees and soft-deleted users", () => {
 
     expect((await deleteUser(doomed.id, admin)).status).toBe(204);
     expect(await getTicketAssignee(ticketId, agent)).toBeNull();
+    // The cascade is scoped to the deleted user: another assignee is untouched.
+    expect(await getTicketAssignee(otherTicketId, agent)).toEqual({ id: agentId, name: AGENT.name });
   });
 });
 

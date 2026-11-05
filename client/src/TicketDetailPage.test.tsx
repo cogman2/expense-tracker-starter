@@ -186,6 +186,15 @@ describe("TicketDetailPage assignment", () => {
 
     await waitFor(() => expect(select).toHaveDisplayValue("Alex Admin"));
     expect(assignBodies()).toEqual([["/api/tickets/42", { assigneeId: ALEX.id }]]);
+    // The staff list is refetched only by invalidating every ["tickets", …] query,
+    // the prefix the list's queries live under too — so the list picks it up.
+    await waitFor(() => {
+      const calls = httpCalls();
+      const after = calls.slice(calls.findIndex((call) => call.method === "patch") + 1);
+      expect(after.map((call) => call.url)).toEqual(
+        expect.arrayContaining(["/api/tickets/42", "/api/tickets/assignees"]),
+      );
+    });
   });
 
   test("Unassigned sends null", async () => {
@@ -208,24 +217,50 @@ describe("TicketDetailPage assignment", () => {
     expect(await assigneeSelect()).toBeDisabled();
   });
 
-  test("shows the server's message when assigning fails", async () => {
-    const user = userEvent.setup();
-    respondAssign = () => ({ status: 400, data: { error: "assignee must be an active user" } });
-    renderAt();
+  test("shows the server's message when assigning fails, or a fallback without one", async () => {
+    const cases: [FakeResponse, string][] = [
+      [{ status: 400, data: { error: "assignee must be an active user" } }, "assignee must be an active user"],
+      [{ status: 500 }, "Could not assign the ticket."],
+    ];
+    for (const [failure, message] of cases) {
+      const user = userEvent.setup();
+      respondAssign = () => failure;
+      renderAt();
 
-    await user.selectOptions(await assigneeSelect(), "Sam Agent");
+      await user.selectOptions(await assigneeSelect(), "Sam Agent");
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("assignee must be an active user");
-    expect(await assigneeSelect()).toHaveDisplayValue("Unassigned");
+      expect(await screen.findByRole("alert")).toHaveTextContent(message);
+      expect(await assigneeSelect()).toHaveDisplayValue("Unassigned");
+      cleanup();
+    }
   });
 
-  test("reads as text when the staff list cannot load", async () => {
-    respond = () => ({ status: 200, data: { ticket: detail({ assignee: SAM }) } });
+  test("reads as text, or Unassigned, when the staff list cannot load", async () => {
     respondAssignees = () => ({ status: 400, data: { error: "boom" } });
+    for (const [assignee, text] of [[SAM, "Sam Agent"], [null, "Unassigned"]] as const) {
+      respond = () => ({ status: 200, data: { ticket: detail({ assignee }) } });
+      renderAt();
+
+      await screen.findByRole("heading", { name: "Can't log in" });
+      expect(await screen.findByText(text)).toBeInTheDocument();
+      expect(screen.queryByRole("combobox")).toBeNull();
+      cleanup();
+    }
+  });
+
+  test("keeps the current assignee selectable when the staff list lacks them", async () => {
+    const former: TicketAssignee = { id: "u9", name: "Former Staff" };
+    respond = () => ({ status: 200, data: { ticket: detail({ assignee: former }) } });
     renderAt();
 
-    await screen.findByRole("heading", { name: "Can't log in" });
-    expect(await screen.findByText("Sam Agent")).toBeInTheDocument();
-    expect(screen.queryByRole("combobox")).toBeNull();
+    const select = await assigneeSelect();
+    expect(select).toHaveDisplayValue("Former Staff");
+    const options = within(select).getAllByRole("option");
+    expect(options.map((o) => o.textContent)).toEqual([
+      "Unassigned",
+      "Former Staff",
+      "Alex Admin",
+      "Sam Agent",
+    ]);
   });
 });

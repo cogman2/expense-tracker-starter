@@ -10,7 +10,7 @@ import {
   type TicketSortFieldValue,
   type TicketStatusValue,
 } from "core";
-import { AGENT, loginAndWaitForHome } from "./auth-helpers";
+import { ADMIN, AGENT, loginAndWaitForHome } from "./auth-helpers";
 import { db } from "./db";
 import { buildEmail, createTicket, uid } from "./inbound-helpers";
 
@@ -31,6 +31,7 @@ type ApiTicket = {
   category: TicketCategoryValue | null;
   createdAt: string;
   customer: { name: string | null; email: string };
+  assignee: { id: string; name: string } | null;
 };
 type TicketList = {
   tickets: ApiTicket[];
@@ -207,6 +208,32 @@ test.describe("GET /api/tickets", () => {
 
     expect(await ours(SortOrder.asc)).toEqual([general, technical, refund, uncategorized]);
     expect(await ours(SortOrder.desc)).toEqual([refund, technical, general, uncategorized]);
+  });
+
+  // Null placement here is Postgres's default (Prisma offers no `nulls` option for a required field through an
+  // optional relation, see server/src/ticket-sort.ts): unassigned is last A->Z but first Z->A, unlike Customer/Category.
+  // Unit tests only check the orderBy shape.
+  test("sorts by assignee name; unassigned follows Postgres's default null placement", async () => {
+    const run = uid();
+    const withAssignee = async (tag: string, assigneeId: string | null) => {
+      const { id } = await newTicket(`${run} ${tag}`);
+      if (assigneeId) await db.ticket.update({ where: { id }, data: { assigneeId } });
+      return id;
+    };
+    const adminUser = await db.user.findUniqueOrThrow({ where: { email: ADMIN.email } });
+    const agentUser = await db.user.findUniqueOrThrow({ where: { email: AGENT.email } });
+    // Created scrambled so insertion/id order can't pass the test.
+    const agent = await withAssignee("g", agentUser.id);
+    const unassigned = await withAssignee("n", null);
+    const admin = await withAssignee("d", adminUser.id);
+    const cookie = await agentCookie();
+    const ours = (order: SortOrderValue) =>
+      walkSorted(cookie, TicketSortField.assignee, order, (t) => t.subject.includes(run)).then((ts) =>
+        ts.map((t) => t.id),
+      );
+
+    expect(await ours(SortOrder.asc)).toEqual([admin, agent, unassigned]);
+    expect(await ours(SortOrder.desc)).toEqual([unassigned, agent, admin]);
   });
 
   // The WHERE must reach both findMany and count in Postgres, so only the real DB
