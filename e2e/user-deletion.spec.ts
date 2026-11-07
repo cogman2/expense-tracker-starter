@@ -1,40 +1,16 @@
 import { expect, test } from "@playwright/test";
-import { ADMIN, AGENT, loginAndWaitForHome } from "./auth-helpers";
+import { SERVER_URL, adminCookie, agentCookie, signIn, signInCookie } from "./api-helpers";
+import { ADMIN, loginAndWaitForHome } from "./auth-helpers";
 import { Role } from "core";
 
 // Covers DELETE /api/users/:id (soft delete, server/src/routes/users.ts), the
 // sign-in block in server/src/auth.ts, and the delete dialog on /users.
-//
-// Server-side checks use native `fetch()` with manual cookie threading, for the
-// same Bun/Playwright APIRequestContext reason documented in user-editing.spec.ts.
-const SERVER_URL = "http://localhost:3000";
+// Server-side checks use the native-fetch helpers in ./api-helpers.
 
 type ApiUser = { id: string; name: string; email: string; role: string };
 
-function sessionCookieFrom(res: Response): string {
-  const setCookie = res.headers.get("set-cookie");
-  if (!setCookie) {
-    throw new Error("Expected a Set-Cookie header on the response");
-  }
-  return setCookie.split(";")[0]!;
-}
-
-function signIn(email: string, password: string) {
-  return fetch(`${SERVER_URL}/api/auth/sign-in/email`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, password }),
-  });
-}
-
-async function signInCookie(email: string, password: string): Promise<string> {
-  const res = await signIn(email, password);
-  expect(res.status).toBe(200);
-  return sessionCookieFrom(res);
-}
-
-const signInAsAdmin = () => signInCookie(ADMIN.email, ADMIN.password);
-const signInAsAgent = () => signInCookie(AGENT.email, AGENT.password);
+const signInAsAdmin = adminCookie;
+const signInAsAgent = agentCookie;
 
 function getMe(cookie: string) {
   return fetch(`${SERVER_URL}/api/me`, { headers: { Cookie: cookie } });

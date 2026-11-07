@@ -4,9 +4,9 @@
 import express from "express";
 import {
   TICKETS_PAGE_SIZE,
-  assignTicketSchema,
   ticketIdParamSchema,
   ticketListQuerySchema,
+  updateTicketSchema,
 } from "core";
 import { prisma } from "../db";
 import { pageWindow } from "../pagination";
@@ -135,28 +135,31 @@ ticketsRouter.get("/api/tickets/:id", requireAuth, async (req, res, next) => {
   }
 });
 
-// Assigns the ticket to a staff user, or unassigns it ({ assigneeId: null }).
-// Any signed-in user may, as anyone may read the list: agents pick tickets up
-// and hand them on. The assignee must be an active user — a soft-deleted one is
-// gone as far as the API is concerned.
+// A partial update of the ticket: its assignee ({ assigneeId: null } unassigns),
+// status and/or category ({ category: null } uncategorizes). Absent fields are
+// left as they are. Any signed-in user may, as anyone may read the list: agents
+// pick tickets up, hand them on, categorize and resolve them. An assignee must
+// be an active user — a soft-deleted one is gone as far as the API is concerned.
 //
-// The check and the write share a transaction that holds the assignee's row
-// FOR SHARE, so they can't interleave with DELETE /api/users/:id (./users.ts):
-// a delete that started first is waited for and the user then reads as gone
-// (400); one that starts after waits for this commit, then unassigns the ticket.
-// Checked separately, a ticket could be left assigned to a deleted user.
+// When an assignee is named, the check and the write share a transaction that
+// holds the assignee's row FOR SHARE, so they can't interleave with
+// DELETE /api/users/:id (./users.ts): a delete that started first is waited for
+// and the user then reads as gone (400); one that starts after waits for this
+// commit, then unassigns the ticket. Checked separately, a ticket could be left
+// assigned to a deleted user.
 ticketsRouter.patch("/api/tickets/:id", requireAuth, async (req, res, next) => {
   const id = ticketIdParamSchema.safeParse(req.params.id);
   if (!id.success) {
     res.status(400).json({ error: firstIssueMessage(id.error) });
     return;
   }
-  const body = assignTicketSchema.safeParse(req.body);
+  const body = updateTicketSchema.safeParse(req.body);
   if (!body.success) {
     res.status(400).json({ error: firstIssueMessage(body.error) });
     return;
   }
-  const { assigneeId } = body.data;
+  // Undefined fields are skipped by Prisma, so only what was sent changes.
+  const { assigneeId, status, category } = body.data;
 
   try {
     const ticket = await prisma.ticket.findUnique({
@@ -169,7 +172,7 @@ ticketsRouter.patch("/api/tickets/:id", requireAuth, async (req, res, next) => {
     }
 
     const updated = await prisma.$transaction(async (tx) => {
-      if (assigneeId !== null) {
+      if (typeof assigneeId === "string") {
         const active = await tx.$queryRaw<{ id: string }[]>`
           SELECT "id" FROM "User"
           WHERE "id" = ${assigneeId} AND "deletedAt" IS NULL
@@ -178,8 +181,8 @@ ticketsRouter.patch("/api/tickets/:id", requireAuth, async (req, res, next) => {
       }
       return tx.ticket.update({
         where: { id: ticket.id },
-        data: { assigneeId },
-        select: { id: true, assignee: ASSIGNEE_SELECT },
+        data: { assigneeId, status, category },
+        select: { id: true, status: true, category: true, assignee: ASSIGNEE_SELECT },
       });
     });
     if (!updated) {

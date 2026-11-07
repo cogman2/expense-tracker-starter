@@ -2,7 +2,9 @@ import { z } from "zod";
 import {
   SORT_ORDERS,
   SortOrder,
+  TICKET_CATEGORIES,
   TICKET_SORT_FIELDS,
+  TICKET_STATUSES,
   TicketSortField,
 } from "../constants/tickets";
 import {
@@ -166,26 +168,42 @@ export const ticketIdParamSchema = z
 export type TicketIdParam = z.infer<typeof ticketIdParamSchema>;
 
 const ASSIGNEE_MESSAGE = "assigneeId must be a user id or null";
+const STATUS_MESSAGE = `status must be one of: ${TICKET_STATUSES.join(", ")}`;
+const CATEGORY_MESSAGE = `category must be one of: ${TICKET_CATEGORIES.join(", ")}, or null`;
+const UPDATE_FIELDS = ["assigneeId", "status", "category"] as const;
+const EMPTY_UPDATE_MESSAGE = `provide at least one of: ${UPDATE_FIELDS.join(", ")}`;
 
 /**
- * The PATCH /api/tickets/:id payload: who works the ticket. `null` unassigns it,
- * so the field is required — a missing one is an error, not "no change". The
- * server also checks the id names an active user; that needs the database.
- * Control characters are refused here: no user id has one, and Postgres rejects
- * a NUL byte in a query parameter with an error rather than a miss.
+ * The PATCH /api/tickets/:id payload: a partial update of who works the ticket,
+ * its status and its category. A missing field means "no change"; `null`
+ * unassigns (assigneeId) or uncategorizes (category) — status is never null. At
+ * least one field must be present, so an empty body is an error, not a no-op.
+ *
+ * The server also checks an assigneeId names an active user; that needs the
+ * database. Control characters are refused here: no user id has one, and
+ * Postgres rejects a NUL byte in a query parameter with an error rather than a
+ * miss. Field order is the precedence a multiply-invalid body gets.
  */
-export const assignTicketSchema = z.object(
-  {
-    assigneeId: z
-      .string({ error: ASSIGNEE_MESSAGE })
-      .trim()
-      .min(1, ASSIGNEE_MESSAGE)
-      .regex(/^\P{Cc}+$/u, ASSIGNEE_MESSAGE)
-      .nullable(),
-  },
-  // A body that is not an object at all (an array, a bare string) gets the
-  // API's wording, not zod's.
-  { error: ASSIGNEE_MESSAGE },
-);
+export const updateTicketSchema = z
+  .object(
+    {
+      assigneeId: z
+        .string({ error: ASSIGNEE_MESSAGE })
+        .trim()
+        .min(1, ASSIGNEE_MESSAGE)
+        .regex(/^\P{Cc}+$/u, ASSIGNEE_MESSAGE)
+        .nullable()
+        .optional(),
+      status: z.enum(TICKET_STATUSES, { error: STATUS_MESSAGE }).optional(),
+      category: z.enum(TICKET_CATEGORIES, { error: CATEGORY_MESSAGE }).nullable().optional(),
+    },
+    // A body that is not an object at all (an array, a bare string) gets the
+    // API's wording, not zod's.
+    { error: EMPTY_UPDATE_MESSAGE },
+  )
+  // Unknown keys are stripped, so { foo: 1 } lands here too.
+  .refine((body) => UPDATE_FIELDS.some((field) => body[field] !== undefined), {
+    error: EMPTY_UPDATE_MESSAGE,
+  });
 
-export type AssignTicketInput = z.infer<typeof assignTicketSchema>;
+export type UpdateTicketInput = z.infer<typeof updateTicketSchema>;

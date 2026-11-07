@@ -2,7 +2,6 @@
 // (Better Auth is the exception — it ships its own fetch layer, see auth-client).
 import axios from "axios";
 import type {
-  AssignTicketInput,
   CreateUserInput,
   SortOrderValue,
   TicketCategoryValue,
@@ -10,6 +9,7 @@ import type {
   TicketListQuery,
   TicketSortFieldValue,
   TicketStatusValue,
+  UpdateTicketInput,
   UpdateUserInput,
   UserRole,
 } from "core";
@@ -170,18 +170,20 @@ export async function getAssignees(signal?: AbortSignal): Promise<TicketAssignee
   return data.assignees;
 }
 
-// Assigns a ticket, or unassigns it with null. Answers with the new assignee.
-export async function assignTicket(
+/** What PATCH /api/tickets/:id answers with: the ticket's editable fields, as saved. */
+export type TicketUpdate = Pick<TicketRow, "id" | "status" | "category" | "assignee">;
+
+// Changes any of a ticket's assignee, status and category; absent fields stay as
+// they are, and null unassigns or uncategorizes. Answers with the fields as saved.
+export async function updateTicket(
   id: number,
-  input: AssignTicketInput,
+  input: UpdateTicketInput,
   signal?: AbortSignal,
-): Promise<TicketAssignee | null> {
-  const { data } = await api.patch<{ ticket: { id: number; assignee: TicketAssignee | null } }>(
-    `/api/tickets/${id}`,
-    input,
-    { signal },
-  );
-  return data.ticket.assignee;
+): Promise<TicketUpdate> {
+  const { data } = await api.patch<{ ticket: TicketUpdate }>(`/api/tickets/${id}`, input, {
+    signal,
+  });
+  return data.ticket;
 }
 
 // Surfaces the server's `{ error }` message from a failed response, falling back

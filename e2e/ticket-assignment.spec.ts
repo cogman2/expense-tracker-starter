@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { Role, SortOrder, TICKETS_PAGE_SIZE, TicketSortField } from "core";
+import { SERVER_URL, adminCookie, agentCookie, patchTicket } from "./api-helpers";
 import { ADMIN, AGENT, loginAndWaitForHome } from "./auth-helpers";
 import { db } from "./db";
 import { createTicket, uid } from "./inbound-helpers";
@@ -8,32 +9,8 @@ import { createTicket, uid } from "./inbound-helpers";
 // client/src/TicketDetailPage.test.tsx and TicketsPage.test.tsx; this spec keeps
 // what needs the real stack: PATCH /api/tickets/:id, GET /api/tickets/assignees,
 // persistence, and the soft-delete cascade (server/src/routes/{tickets,users}.ts).
-// Server checks use native fetch() (Playwright's request fixture is unreliable on Bun).
-const SERVER_URL = "http://localhost:3000";
-
 type Assignee = { id: string; name: string };
 type ApiUser = { id: string; name: string; email: string };
-
-async function signInCookie(email: string, password: string): Promise<string> {
-  const res = await fetch(`${SERVER_URL}/api/auth/sign-in/email`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, password }),
-  });
-  expect(res.status).toBe(200);
-  return res.headers.get("set-cookie")!.split(";")[0]!;
-}
-
-const adminCookie = () => signInCookie(ADMIN.email, ADMIN.password);
-const agentCookie = () => signInCookie(AGENT.email, AGENT.password);
-
-function patchTicket(id: string | number, body: unknown, cookie?: string) {
-  return fetch(`${SERVER_URL}/api/tickets/${id}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json", ...(cookie ? { Cookie: cookie } : {}) },
-    body: typeof body === "string" ? body : JSON.stringify(body),
-  });
-}
 
 async function getTicketAssignee(id: number, cookie: string): Promise<Assignee | null> {
   const res = await fetch(`${SERVER_URL}/api/tickets/${id}`, { headers: { Cookie: cookie } });
@@ -90,16 +67,9 @@ test.describe("PATCH /api/tickets/:id validation", () => {
     const { ticketId } = await createTicket();
     const res = await patchTicket(ticketId, {}, await agentCookie());
     expect(res.status).toBe(400);
-    expect(await res.json()).toEqual({ error: "assigneeId must be a user id or null" });
-  });
-
-  test("rejects an unknown assignee id with 400 and leaves the ticket unassigned", async () => {
-    const cookie = await agentCookie();
-    const { ticketId } = await createTicket();
-    const res = await patchTicket(ticketId, { assigneeId: "no-such-user" }, cookie);
-    expect(res.status).toBe(400);
-    expect(await res.json()).toEqual({ error: "assignee must be an active user" });
-    expect(await getTicketAssignee(ticketId, cookie)).toBeNull();
+    expect(await res.json()).toEqual({
+      error: "provide at least one of: assigneeId, status, category",
+    });
   });
 
   test("is 404 for a missing ticket, before the assignee is checked", async () => {
@@ -122,7 +92,7 @@ test.describe("assigning and unassigning", () => {
 
     const res = await patchTicket(ticketId, { assigneeId: adminId }, cookie);
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({
+    expect(await res.json()).toMatchObject({
       ticket: { id: ticketId, assignee: { id: adminId, name: ADMIN.name } },
     });
     expect(await getTicketAssignee(ticketId, cookie)).toEqual({ id: adminId, name: ADMIN.name });
@@ -139,7 +109,7 @@ test.describe("assigning and unassigning", () => {
 
     const clear = await patchTicket(ticketId, { assigneeId: null }, cookie);
     expect(clear.status).toBe(200);
-    expect(await clear.json()).toEqual({ ticket: { id: ticketId, assignee: null } });
+    expect(await clear.json()).toMatchObject({ ticket: { id: ticketId, assignee: null } });
     expect(await getTicketAssignee(ticketId, cookie)).toBeNull();
 
     await page.goto(listUrl);

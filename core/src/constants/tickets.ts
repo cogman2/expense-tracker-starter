@@ -19,6 +19,17 @@ export const TicketStatus = {
 } as const satisfies { [S in TicketStatusValue]: S };
 
 /**
+ * How each status reads on screen. The values above stay the stored and wire
+ * format; these are display only. The `satisfies` clause fails the build when a
+ * status is added without a label.
+ */
+export const TICKET_STATUS_LABELS = {
+  open: "Open",
+  resolved: "Resolved",
+  closed: "Closed",
+} as const satisfies { [S in TicketStatusValue]: string };
+
+/**
  * What a ticket is about. Optional on a ticket: inbound email arrives
  * uncategorized, so the column is null until someone sets it. server/src/schemas.ts
  * asserts at compile time that this matches Prisma's TicketCategory enum.

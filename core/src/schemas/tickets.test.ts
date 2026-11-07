@@ -4,16 +4,18 @@ import {
   SortOrder,
   TICKET_CATEGORIES,
   TICKET_SORT_FIELDS,
+  TICKET_STATUSES,
   TicketCategory,
   TicketSortField,
+  TicketStatus,
 } from "../constants/tickets";
 import {
-  assignTicketSchema,
   inboundEmailSchema,
   NO_SUBJECT,
   ticketIdParamSchema,
   ticketListQuerySchema,
   type TicketListQuery,
+  updateTicketSchema,
 } from "./tickets";
 
 const valid = {
@@ -248,32 +250,83 @@ describe("ticketIdParamSchema", () => {
   });
 });
 
-describe("assignTicketSchema", () => {
+describe("updateTicketSchema", () => {
+  const EMPTY = "provide at least one of: assigneeId, status, category";
+  const messageFor = (body: unknown) =>
+    updateTicketSchema.safeParse(body).error?.issues[0]?.message;
+
   test("takes a user id, trimmed, or null to unassign", () => {
-    expect(assignTicketSchema.parse({ assigneeId: " u1 " })).toEqual({ assigneeId: "u1" });
-    expect(assignTicketSchema.parse({ assigneeId: null })).toEqual({ assigneeId: null });
+    expect(updateTicketSchema.parse({ assigneeId: " u1 " })).toEqual({ assigneeId: "u1" });
+    expect(updateTicketSchema.parse({ assigneeId: null })).toEqual({ assigneeId: null });
   });
 
   // Control characters can't be in a user id, and Postgres refuses a NUL byte in
   // a text parameter outright — the lookup would be a 500, not this 400.
-  test("rejects a missing, blank, non-string or control-character assignee", () => {
-    for (const body of [
-      {},
-      { assigneeId: "" },
-      { assigneeId: "  " },
-      { assigneeId: 7 },
-      { assigneeId: "a\u0000b" },
-      { assigneeId: "a\nb" },
-    ]) {
-      const parsed = assignTicketSchema.safeParse(body);
-      expect(parsed.error?.issues[0]?.message).toBe("assigneeId must be a user id or null");
+  test("rejects a blank, non-string or control-character assignee", () => {
+    for (const assigneeId of ["", "  ", 7, "a\u0000b", "a\nb"]) {
+      expect(messageFor({ assigneeId }), JSON.stringify(assigneeId)).toBe(
+        "assigneeId must be a user id or null",
+      );
+    }
+  });
+
+  test("takes every status, but never null", () => {
+    for (const status of TICKET_STATUSES) {
+      expect(updateTicketSchema.parse({ status })).toEqual({ status });
+    }
+    for (const status of [null, "pending", "OPEN", 1]) {
+      expect(messageFor({ status }), JSON.stringify(status)).toBe(
+        "status must be one of: open, resolved, closed",
+      );
+    }
+  });
+
+  test("takes every category, or null to uncategorize", () => {
+    for (const category of TICKET_CATEGORIES) {
+      expect(updateTicketSchema.parse({ category })).toEqual({ category });
+    }
+    expect(updateTicketSchema.parse({ category: null })).toEqual({ category: null });
+    for (const category of ["billing", "", 1]) {
+      expect(messageFor({ category }), JSON.stringify(category)).toBe(
+        "category must be one of: general_question, technical_question, refund_request, or null",
+      );
+    }
+  });
+
+  test("updates several fields at once, leaving absent ones out", () => {
+    expect(
+      updateTicketSchema.parse({
+        status: TicketStatus.resolved,
+        category: TicketCategory.refund_request,
+      }),
+    ).toEqual({ status: TicketStatus.resolved, category: TicketCategory.refund_request });
+  });
+
+  test("reports assigneeId, then status, then category when several are wrong", () => {
+    expect(messageFor({ assigneeId: 7, status: "x", category: "x" })).toBe(
+      "assigneeId must be a user id or null",
+    );
+    expect(messageFor({ status: "x", category: "x" })).toBe(
+      "status must be one of: open, resolved, closed",
+    );
+    // A valid field doesn't hide a later invalid one.
+    expect(messageFor({ assigneeId: "u1", status: "x" })).toBe(
+      "status must be one of: open, resolved, closed",
+    );
+    expect(messageFor({ assigneeId: null, status: TicketStatus.open, category: "x" })).toBe(
+      "category must be one of: general_question, technical_question, refund_request, or null",
+    );
+  });
+
+  test("rejects a body with nothing to update", () => {
+    for (const body of [{}, { foo: 1 }, { status: undefined }]) {
+      expect(messageFor(body), JSON.stringify(body)).toBe(EMPTY);
     }
   });
 
   test("answers a body that is not an object with the same message", () => {
     for (const body of [undefined, null, [], "u1"]) {
-      const parsed = assignTicketSchema.safeParse(body);
-      expect(parsed.error?.issues[0]?.message).toBe("assigneeId must be a user id or null");
+      expect(messageFor(body), JSON.stringify(body)).toBe(EMPTY);
     }
   });
 });
