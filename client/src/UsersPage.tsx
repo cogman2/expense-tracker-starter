@@ -1,0 +1,655 @@
+import {
+  useEffect,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type ReactNode,
+} from "react";
+import { useForm } from "react-hook-form";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { zodResolver } from "@hookform/resolvers/zod";
+// Shared with the server, which validates the same payload (core/src/users.ts).
+import {
+  canDeleteUser,
+  createUserSchema,
+  Role,
+  updateUserSchema,
+  ROLES,
+  type CreateUserInput,
+  type UpdateUserInput,
+} from "core";
+import { Check, Pencil, Trash2, X } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogClose,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import {
+  Field,
+  FieldError,
+  FieldGroup,
+  FieldLabel,
+} from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
+import { Skeleton } from "@/components/ui/skeleton";
+import {
+  apiErrorMessage,
+  createUser,
+  deleteUser,
+  getUsers,
+  updateUser,
+  type UserRow,
+} from "@/lib/api";
+import { queryKeys } from "@/lib/queryKeys";
+
+const SKELETON_ROWS = 3;
+
+// One definition for both the skeleton and the real table. The widths are
+// declared here and applied through a <colgroup> under `table-fixed`, rather
+// than left to the browser to derive from cell content: an auto-layout table
+// re-measures its columns whenever the content changes, which made every column
+// boundary jump as the skeleton gave way to data (the Name column went 185px ->
+// 115px) and made the loaded table reflow whenever a long name or email landed.
+// `bar` is the placeholder width, sized so the skeleton reads as names, emails
+// and roles rather than four identical strips.
+// `srOnlyLabel` marks a column whose header is for assistive tech only — the
+// actions column shows icon buttons, so a visible "Actions" heading would be
+// noise, but a blank <th> leaves the column unnamed.
+const COLUMNS = [
+  { label: "Name", width: "w-[28%]", bar: "w-28" },
+  { label: "Email", width: "w-[32%]", bar: "w-40" },
+  { label: "Role", width: "w-[12%]", bar: "w-16" },
+  { label: "Created", width: "w-[14%]", bar: "w-20" },
+  { label: "Actions", width: "w-[14%]", bar: "w-12", srOnlyLabel: true },
+] as const;
+
+// Shared so a row cannot render its date one way and its editor another.
+const formatCreated = (iso: string) => new Date(iso).toLocaleDateString();
+
+// break-words matters under `table-fixed`: the columns are percentages, so at
+// phone widths an address like a.very.long.name@example.com is wider than its
+// cell, and with nothing to break on it would otherwise spill across the columns
+// beside it.
+const cellPadding = (index: number) =>
+  index === COLUMNS.length - 1 ? "py-2 break-words" : "py-2 pr-4 break-words";
+
+// The wrapper, column widths and header row, shared so the loading and loaded
+// tables cannot drift apart. Callers supply only the <tbody>.
+function UsersTableFrame({ children }: { children: ReactNode }) {
+  return (
+    <div className="max-w-2xl overflow-x-auto">
+      <table className="w-full table-fixed border-collapse text-left text-sm">
+        <colgroup>
+          {COLUMNS.map((column) => (
+            <col key={column.label} className={column.width} />
+          ))}
+        </colgroup>
+        <thead>
+          <tr className="border-b border-gray-200 text-gray-500">
+            {COLUMNS.map((column, index) => (
+              <th
+                key={column.label}
+                className={`${cellPadding(index)} font-medium`}
+              >
+                {"srOnlyLabel" in column ? (
+                  <span className="sr-only">{column.label}</span>
+                ) : (
+                  column.label
+                )}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        {children}
+      </table>
+    </div>
+  );
+}
+
+function UsersTableSkeleton() {
+  return (
+    <UsersTableFrame>
+      <tbody>
+        {Array.from({ length: SKELETON_ROWS }, (_, row) => (
+          <tr key={row} className="border-b border-gray-100">
+            {COLUMNS.map((column, index) => (
+              <td key={column.label} className={cellPadding(index)}>
+                <Skeleton className={`h-4 ${column.bar}`} />
+              </td>
+            ))}
+          </tr>
+        ))}
+      </tbody>
+    </UsersTableFrame>
+  );
+}
+
+// Shared by both role pickers; each adds its own width and padding.
+const SELECT_CLASS =
+  "h-9 rounded-md border border-input bg-transparent text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50";
+
+// Both pickers derive their options from ROLES (core/src/users.ts), so neither
+// can offer a role the server's schema would reject.
+function RoleOptions() {
+  return (
+    <>
+      {ROLES.map((role) => (
+        <option key={role} value={role}>
+          {role[0]!.toUpperCase() + role.slice(1)}
+        </option>
+      ))}
+    </>
+  );
+}
+
+// One row in edit mode. It owns its own useForm against the shared update schema
+// (the same wiring as the create form, per CLAUDE.md), so opening a row never
+// disturbs the create form's state and the two sets of field errors stay apart.
+//
+// Rendered with key={user.id} by the caller, which is what guarantees fresh
+// defaultValues when a different row is opened.
+function UserRowEditor({
+  user,
+  onCancel,
+  onSave,
+}: {
+  user: UserRow;
+  onCancel: () => void;
+  onSave: (values: UpdateUserInput) => Promise<void>;
+}) {
+  const {
+    register,
+    handleSubmit,
+    setError,
+    formState: { errors, isSubmitting },
+  } = useForm<UpdateUserInput>({
+    resolver: zodResolver(updateUserSchema),
+    defaultValues: { name: user.name, email: user.email, role: user.role },
+    mode: "onChange",
+  });
+
+  const saveRef = useRef<HTMLButtonElement>(null);
+
+  // Not wrapped in a <form>: a <form> cannot contain a <tr>, and the cross-table
+  // `form=` attribute dance buys nothing here. handleSubmit works as a plain
+  // handler, called from the Save button and from Enter in any field.
+  const submit = handleSubmit(async (values) => {
+    try {
+      await onSave(values);
+    } catch (err) {
+      setError("root", {
+        message: apiErrorMessage(
+          err,
+          "Could not save the changes. Please try again.",
+        ),
+      });
+    }
+  });
+
+  // Clicking a button does not focus it on macOS, so a rejected save leaves focus
+  // on <body> — outside the row, where Escape and Enter reach nothing and a
+  // keyboard user has lost their place entirely. Put it back on Save: adjacent to
+  // the message and still inside the row. This has to run after the render that
+  // clears isSubmitting, because focusing a disabled button does nothing.
+  // (A failed client-side validation needs no equivalent: react-hook-form focuses
+  // the offending field itself.)
+  const serverError = errors.root?.message;
+  const errorMessage =
+    serverError ??
+    errors.name?.message ??
+    errors.email?.message ??
+    errors.role?.message;
+  useEffect(() => {
+    if (serverError) saveRef.current?.focus();
+  }, [serverError]);
+
+  // Enter saves, but only from a field: on the Save or Cancel button the browser
+  // already activates the focused button, which is what a keyboard user expects.
+  const onFieldKeyDown = (event: ReactKeyboardEvent) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      void submit();
+    }
+  };
+
+  // Escape is handled on the row rather than per field so it works wherever focus
+  // happens to be — including the Save button, where focus lands after a rejected
+  // save, which is exactly when backing out is most likely.
+  const onRowKeyDown = (event: ReactKeyboardEvent) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      onCancel();
+    }
+  };
+
+  return (
+    <>
+      <tr className="border-b border-gray-100" onKeyDown={onRowKeyDown}>
+        <td className={cellPadding(0)}>
+          {/* aria-label rather than a visible label: a table row has no room for
+              one, but the field still needs a name — and it has to say *which*
+              user's name, or it is indistinguishable from the create form's
+              "Name" field to anyone navigating by label. `user` is the row as
+              last fetched, so the label does not shift as the field is typed in. */}
+          <Input
+            aria-label={`Name for ${user.name}`}
+            autoFocus
+            aria-invalid={errors.name ? true : undefined}
+            onKeyDown={onFieldKeyDown}
+            {...register("name")}
+          />
+        </td>
+        <td className={cellPadding(1)}>
+          <Input
+            aria-label={`Email for ${user.name}`}
+            type="email"
+            aria-invalid={errors.email ? true : undefined}
+            onKeyDown={onFieldKeyDown}
+            {...register("email")}
+          />
+        </td>
+        <td className={cellPadding(2)}>
+          <select
+            aria-label={`Role for ${user.name}`}
+            className={`${SELECT_CLASS} w-full px-2`}
+            aria-invalid={errors.role ? true : undefined}
+            onKeyDown={onFieldKeyDown}
+            {...register("role")}
+          >
+            <RoleOptions />
+          </select>
+        </td>
+        <td className={cellPadding(3)}>
+          {formatCreated(user.createdAt)}
+        </td>
+        <td className={cellPadding(4)}>
+          <div className="flex items-center gap-1">
+            <Button
+              ref={saveRef}
+              type="button"
+              size="icon-sm"
+              variant="ghost"
+              aria-label={`Save ${user.name}`}
+              disabled={isSubmitting}
+              onClick={() => void submit()}
+            >
+              <Check />
+            </Button>
+            <Button
+              type="button"
+              size="icon-sm"
+              variant="ghost"
+              aria-label={`Cancel editing ${user.name}`}
+              onClick={onCancel}
+            >
+              <X />
+            </Button>
+          </div>
+        </td>
+      </tr>
+      {/* Errors live in their own full-width row: the server's messages are long
+          enough to stretch a fixed-width cell out of shape. A server rejection
+          outranks a field error — it is the newer news. */}
+      {errorMessage && (
+        <tr className="border-b border-gray-100">
+          {/* role="alert" so the failure is announced when it appears, rather
+              than only being noticed by someone who can see the row. */}
+          <td
+            role="alert"
+            colSpan={COLUMNS.length}
+            className="pb-2 text-sm text-red-600"
+          >
+            {errorMessage}
+          </td>
+        </tr>
+      )}
+    </>
+  );
+}
+
+// Confirmation before a soft delete. Controlled by the page: `user` is the row
+// being confirmed, kept after `open` goes false so the text does not blank out
+// while the close animation plays. A failed delete keeps the dialog open with
+// the server's message; it closes only once the delete lands.
+function DeleteUserDialog({
+  user,
+  open,
+  onOpenChange,
+  onConfirm,
+}: {
+  user: UserRow | null;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onConfirm: (user: UserRow) => Promise<void>;
+}) {
+  const [error, setError] = useState<string | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  // A fresh dialog starts without the last attempt's error.
+  useEffect(() => {
+    if (open) setError(null);
+  }, [open]);
+
+  async function confirm() {
+    if (!user) return;
+    setError(null);
+    setIsDeleting(true);
+    try {
+      await onConfirm(user);
+    } catch (err) {
+      setError(
+        apiErrorMessage(err, "Could not delete the user. Please try again."),
+      );
+    } finally {
+      setIsDeleting(false);
+    }
+  }
+
+  return (
+    <AlertDialog
+      open={open}
+      // Escape and Cancel are ignored mid-request, so the dialog cannot vanish
+      // while the outcome is still unknown.
+      onOpenChange={(next) => {
+        if (!isDeleting) onOpenChange(next);
+      }}
+    >
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Delete user?</AlertDialogTitle>
+          <AlertDialogDescription>
+            {user?.name} ({user?.email}) will be signed out and will no longer
+            be able to sign in.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        {error && (
+          <p role="alert" className="text-sm text-red-600">
+            {error}
+          </p>
+        )}
+        <AlertDialogFooter>
+          <AlertDialogClose
+            disabled={isDeleting}
+            render={<Button type="button" variant="outline" />}
+          >
+            Cancel
+          </AlertDialogClose>
+          <Button
+            type="button"
+            variant="destructive"
+            disabled={isDeleting}
+            onClick={() => void confirm()}
+          >
+            {isDeleting ? "Deleting…" : "Delete"}
+          </Button>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+}
+
+export function UsersPage() {
+  // Two separate confirmations rather than one shared slot: each belongs beside
+  // the thing that produced it. A save's message shown inside the create-user
+  // card would sit at the bottom of the page, far from the row just edited.
+  const [createdMessage, setCreatedMessage] = useState<string | null>(null);
+  const [savedMessage, setSavedMessage] = useState<string | null>(null);
+  // Which row is open for editing; null means none. One at a time, so a
+  // half-finished edit cannot be forgotten behind another.
+  const [editingId, setEditingId] = useState<string | null>(null);
+  // The row awaiting delete confirmation. Kept separate from the open flag so
+  // the dialog's text survives its close animation.
+  const [deletingUser, setDeletingUser] = useState<UserRow | null>(null);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const queryClient = useQueryClient();
+
+  // The signal aborts the read if the page unmounts mid-load, so navigating
+  // away cannot leave a late response to settle into a dead component.
+  const {
+    data: users,
+    isPending,
+    isError,
+  } = useQuery({
+    queryKey: queryKeys.users.all,
+    queryFn: ({ signal }) => getUsers(signal),
+  });
+
+  const createUserMutation = useMutation({
+    mutationFn: (values: CreateUserInput) => createUser(values),
+    // Refresh the list in place rather than refetching by hand. Invalidating
+    // the broad `users.all` key also covers the filtered lists to come.
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: queryKeys.users.all }),
+  });
+
+  const updateUserMutation = useMutation({
+    mutationFn: ({ id, values }: { id: string; values: UpdateUserInput }) =>
+      updateUser(id, values),
+    // Same invalidation as creation: the PATCH response omits createdAt, so the
+    // list is refetched rather than patched row by row.
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: queryKeys.users.all }),
+  });
+
+  const deleteUserMutation = useMutation({
+    mutationFn: (id: string) => deleteUser(id),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: queryKeys.users.all }),
+  });
+
+  // Throws on failure so the dialog can show the server's message and stay open.
+  async function confirmDelete(user: UserRow) {
+    await deleteUserMutation.mutateAsync(user.id);
+    setDeleteOpen(false);
+    setSavedMessage(`Deleted ${user.email}.`);
+  }
+
+  // Throws on failure so the row editor can surface the server's message inline
+  // and stay open; the row closes only once the save lands.
+  async function saveUser(user: UserRow, values: UpdateUserInput) {
+    setSavedMessage(null);
+    await updateUserMutation.mutateAsync({ id: user.id, values });
+    setEditingId(null);
+    setSavedMessage(`Saved changes to ${values.email}.`);
+  }
+
+  const {
+    register,
+    handleSubmit,
+    reset,
+    setError,
+    formState: { errors, isSubmitting },
+  } = useForm<CreateUserInput>({
+    resolver: zodResolver(createUserSchema),
+    defaultValues: { name: "", email: "", password: "", role: Role.agent },
+    mode: "onChange",
+  });
+
+  const onSubmit = handleSubmit(async (values) => {
+    setCreatedMessage(null);
+    try {
+      await createUserMutation.mutateAsync(values);
+    } catch (err) {
+      setError("root", {
+        message: apiErrorMessage(
+          err,
+          "Could not create the user. Please try again.",
+        ),
+      });
+      return;
+    }
+
+    setCreatedMessage(`Created ${values.role} account for ${values.email}.`);
+    reset();
+  });
+
+  return (
+    <main className="p-8 font-sans text-gray-900">
+      <h1 className="text-2xl font-bold">Users</h1>
+
+      <section className="mt-6" aria-busy={isPending}>
+        {isError && (
+          <p className="text-sm text-red-600">Could not load users.</p>
+        )}
+        {!isError && isPending && <UsersTableSkeleton />}
+        {!isError && users && users.length === 0 && (
+          <p className="text-sm text-gray-500">No users yet.</p>
+        )}
+        {savedMessage && (
+          <p className="mb-2 text-sm text-green-600">{savedMessage}</p>
+        )}
+        {!isError && users && users.length > 0 && (
+          <UsersTableFrame>
+            <tbody>
+              {users.map((u) =>
+                editingId === u.id ? (
+                  <UserRowEditor
+                    key={u.id}
+                    user={u}
+                    onCancel={() => setEditingId(null)}
+                    onSave={(values) => saveUser(u, values)}
+                  />
+                ) : (
+                  <tr key={u.id} className="border-b border-gray-100">
+                    <td className={cellPadding(0)}>{u.name}</td>
+                    <td className={cellPadding(1)}>{u.email}</td>
+                    <td className={cellPadding(2)}>{u.role}</td>
+                    <td className={cellPadding(3)}>
+                      {formatCreated(u.createdAt)}
+                    </td>
+                    <td className={cellPadding(4)}>
+                      <div className="flex items-center gap-1">
+                        {/* Per-row accessible names: "Edit" alone would give
+                            every row's button the same name. */}
+                        <Button
+                          type="button"
+                          size="icon-sm"
+                          variant="ghost"
+                          aria-label={`Edit ${u.name}`}
+                          onClick={() => {
+                            setSavedMessage(null);
+                            setEditingId(u.id);
+                          }}
+                        >
+                          <Pencil />
+                        </Button>
+                        {/* Same rule the server enforces (core/src/users.ts);
+                            this just keeps the dead end off screen. */}
+                        {canDeleteUser(u) && (
+                          <Button
+                            type="button"
+                            size="icon-sm"
+                            variant="ghost"
+                            aria-label={`Delete ${u.name}`}
+                            onClick={() => {
+                              setSavedMessage(null);
+                              setDeletingUser(u);
+                              setDeleteOpen(true);
+                            }}
+                          >
+                            <Trash2 />
+                          </Button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ),
+              )}
+            </tbody>
+          </UsersTableFrame>
+        )}
+        <DeleteUserDialog
+          user={deletingUser}
+          open={deleteOpen}
+          onOpenChange={setDeleteOpen}
+          onConfirm={confirmDelete}
+        />
+      </section>
+
+      <Card className="mt-6 w-full max-w-sm">
+        <CardHeader>
+          <CardTitle className="text-xl">Create user</CardTitle>
+          <CardDescription>
+            Provision a new staff account. The user can sign in immediately.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={onSubmit} noValidate>
+            <FieldGroup>
+              <Field data-invalid={errors.name ? true : undefined}>
+                <FieldLabel htmlFor="name">Name</FieldLabel>
+                <Input
+                  id="name"
+                  autoComplete="off"
+                  aria-invalid={errors.name ? true : undefined}
+                  {...register("name")}
+                />
+                <FieldError errors={errors.name ? [errors.name] : undefined} />
+              </Field>
+
+              <Field data-invalid={errors.email ? true : undefined}>
+                <FieldLabel htmlFor="email">Email</FieldLabel>
+                <Input
+                  id="email"
+                  type="email"
+                  autoComplete="off"
+                  aria-invalid={errors.email ? true : undefined}
+                  {...register("email")}
+                />
+                <FieldError errors={errors.email ? [errors.email] : undefined} />
+              </Field>
+
+              <Field data-invalid={errors.password ? true : undefined}>
+                <FieldLabel htmlFor="password">Password</FieldLabel>
+                <Input
+                  id="password"
+                  type="password"
+                  autoComplete="new-password"
+                  aria-invalid={errors.password ? true : undefined}
+                  {...register("password")}
+                />
+                <FieldError
+                  errors={errors.password ? [errors.password] : undefined}
+                />
+              </Field>
+
+              <Field data-invalid={errors.role ? true : undefined}>
+                <FieldLabel htmlFor="role">Role</FieldLabel>
+                <select
+                  id="role"
+                  className={`${SELECT_CLASS} px-3`}
+                  aria-invalid={errors.role ? true : undefined}
+                  {...register("role")}
+                >
+                  <RoleOptions />
+                </select>
+                <FieldError errors={errors.role ? [errors.role] : undefined} />
+              </Field>
+
+              {errors.root && <FieldError errors={[errors.root]} />}
+              {createdMessage && (
+                <p className="text-sm text-green-600">{createdMessage}</p>
+              )}
+
+              <Button type="submit" disabled={isSubmitting} className="w-full">
+                {isSubmitting ? "Creating…" : "Create user"}
+              </Button>
+            </FieldGroup>
+          </form>
+        </CardContent>
+      </Card>
+    </main>
+  );
+}
