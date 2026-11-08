@@ -2,6 +2,7 @@
 // (Better Auth is the exception — it ships its own fetch layer, see auth-client).
 import axios from "axios";
 import type {
+  CreateReplyInput,
   CreateUserInput,
   SortOrderValue,
   TicketCategoryValue,
@@ -148,9 +149,21 @@ export interface TicketMessage {
   receivedAt: string;
 }
 
-/** One ticket as its detail page shows it: the list row plus its thread, oldest first. */
+/** A staff answer on a ticket. Plain text, like the messages; its author is shown by name only. */
+export interface TicketReply {
+  id: string;
+  body: string;
+  createdAt: string;
+  author: TicketAssignee;
+}
+
+/**
+ * One ticket as its detail page shows it: the list row plus its email thread
+ * and its staff replies, each oldest first.
+ */
 export interface TicketDetail extends TicketRow {
   messages: TicketMessage[];
+  replies: TicketReply[];
 }
 
 // 404 when no ticket has this id; callers tell that apart from other failures.
@@ -184,6 +197,21 @@ export async function updateTicket(
     signal,
   });
   return data.ticket;
+}
+
+// Posts a staff reply as the signed-in user; answers 201 with the reply as stored
+// (body trimmed). Nothing is emailed yet. 404 when the ticket is gone.
+export async function createReply(
+  ticketId: number,
+  input: CreateReplyInput,
+  signal?: AbortSignal,
+): Promise<TicketReply> {
+  const { data } = await api.post<{ reply: TicketReply }>(
+    `/api/tickets/${ticketId}/replies`,
+    input,
+    { signal },
+  );
+  return data.reply;
 }
 
 // Surfaces the server's `{ error }` message from a failed response, falling back

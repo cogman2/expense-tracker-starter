@@ -1,24 +1,31 @@
-import { useId, type ReactNode } from "react";
+import { useId, useRef, type ReactNode } from "react";
 import { Link, useLocation, useParams } from "react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
 import {
   TICKET_CATEGORIES,
   TICKET_CATEGORY_LABELS,
   TICKET_STATUSES,
   TICKET_STATUS_LABELS,
+  createReplySchema,
   ticketIdParamSchema,
+  type CreateReplyInput,
   type TicketCategoryValue,
   type TicketStatusValue,
   type UpdateTicketInput,
 } from "core";
+import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   apiErrorMessage,
+  createReply,
   getAssignees,
   getTicket,
   isNotFound,
   type TicketDetail,
   type TicketMessage,
+  type TicketReply,
   updateTicket,
 } from "@/lib/api";
 import { queryKeys } from "@/lib/queryKeys";
@@ -70,6 +77,96 @@ function Message({ message }: { message: TicketMessage }) {
           whitespace-pre-wrap keeps the email's own line breaks. */}
       <p className="mt-3 text-sm break-words whitespace-pre-wrap">{message.bodyText}</p>
     </li>
+  );
+}
+
+function Reply({ reply }: { reply: TicketReply }) {
+  return (
+    <li className="rounded-md border border-gray-200 bg-gray-50 p-4">
+      <div className="flex flex-wrap items-baseline justify-between gap-2 text-sm">
+        <span className="font-medium">{reply.author.name}</span>
+        <time dateTime={reply.createdAt} className="text-gray-500">
+          {formatDateTime(reply.createdAt)}
+        </time>
+      </div>
+      <p className="mt-3 text-sm break-words whitespace-pre-wrap">{reply.body}</p>
+    </li>
+  );
+}
+
+/**
+ * Posts a reply as the signed-in user. The saved reply is appended to the
+ * cached ticket at once, then the ticket refetches so the thread also picks up
+ * anyone else's replies. A refused or failed post keeps the typed text.
+ *
+ * The textarea has no maxLength on purpose: the browser would silently cut a
+ * long paste short (and counts an emoji as two), so the schema's length message
+ * says what is wrong instead.
+ */
+function ReplyForm({ ticketId }: { ticketId: number }) {
+  const queryClient = useQueryClient();
+  const textareaId = useId();
+  const errorId = useId();
+  const {
+    register,
+    handleSubmit,
+    reset,
+    setError,
+    formState: { errors, isSubmitting },
+  } = useForm<CreateReplyInput>({
+    resolver: zodResolver(createReplySchema),
+    defaultValues: { body: "" },
+  });
+  // isSubmitting disables the button only once React re-renders; two submits in
+  // the same tick would both get past it and post the reply twice. A ref is set
+  // synchronously, so the second one stops here.
+  const sending = useRef(false);
+
+  const onSubmit = handleSubmit(async (values) => {
+    if (sending.current) return;
+    sending.current = true;
+    let reply: TicketReply;
+    try {
+      reply = await createReply(ticketId, values);
+    } catch (err) {
+      setError("root", { message: apiErrorMessage(err, "Could not send the reply.") });
+      return;
+    } finally {
+      sending.current = false;
+    }
+    queryClient.setQueryData<TicketDetail>(queryKeys.tickets.detail(ticketId), (old) =>
+      old && !old.replies.some((r) => r.id === reply.id)
+        ? { ...old, replies: [...old.replies, reply] }
+        : old,
+    );
+    void queryClient.invalidateQueries({ queryKey: queryKeys.tickets.detail(ticketId) });
+    reset();
+  });
+
+  const error = errors.body?.message ?? errors.root?.message;
+  return (
+    <form className="mt-4" onSubmit={onSubmit} noValidate>
+      <label htmlFor={textareaId} className="text-sm font-medium">
+        Reply
+      </label>
+      <textarea
+        id={textareaId}
+        rows={5}
+        aria-invalid={error ? true : undefined}
+        aria-describedby={error ? errorId : undefined}
+        className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm read-only:opacity-60"
+        readOnly={isSubmitting}
+        {...register("body")}
+      />
+      {error && (
+        <p id={errorId} role="alert" className="mt-1 text-sm text-red-600">
+          {error}
+        </p>
+      )}
+      <Button type="submit" className="mt-2" disabled={isSubmitting}>
+        {isSubmitting ? "Sending…" : "Send reply"}
+      </Button>
+    </form>
   );
 }
 
@@ -233,6 +330,8 @@ function AssigneeDetail({ ticket }: { ticket: TicketDetail }) {
 }
 
 function TicketView({ ticket }: { ticket: TicketDetail }) {
+  const messagesHeadingId = useId();
+  const repliesHeadingId = useId();
   return (
     <>
       <h1 className="text-2xl font-bold break-words">{ticket.subject}</h1>
@@ -254,16 +353,32 @@ function TicketView({ ticket }: { ticket: TicketDetail }) {
         <Detail label="Created">{formatDate(ticket.createdAt)}</Detail>
       </dl>
 
-      <h2 className="mt-8 text-lg font-semibold">Messages</h2>
+      <h2 id={messagesHeadingId} className="mt-8 text-lg font-semibold">
+        Messages
+      </h2>
       {ticket.messages.length === 0 ? (
         <p className="mt-3 text-sm text-gray-500">No messages.</p>
       ) : (
-        <ol className="mt-3 space-y-4">
+        <ol aria-labelledby={messagesHeadingId} className="mt-3 space-y-4">
           {ticket.messages.map((message) => (
             <Message key={message.id} message={message} />
           ))}
         </ol>
       )}
+
+      <h2 id={repliesHeadingId} className="mt-8 text-lg font-semibold">
+        Replies
+      </h2>
+      {ticket.replies.length === 0 ? (
+        <p className="mt-3 text-sm text-gray-500">No replies yet.</p>
+      ) : (
+        <ol aria-labelledby={repliesHeadingId} className="mt-3 space-y-4">
+          {ticket.replies.map((reply) => (
+            <Reply key={reply.id} reply={reply} />
+          ))}
+        </ol>
+      )}
+      <ReplyForm ticketId={ticket.id} />
     </>
   );
 }

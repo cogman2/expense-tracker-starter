@@ -41,3 +41,12 @@ export function patchTicket(id: string | number, body: unknown, cookie?: string)
     body: typeof body === "string" ? body : JSON.stringify(body),
   });
 }
+
+/** POST /api/tickets/:id/replies. A string body is sent as-is. */
+export function postReply(id: string | number, body: unknown, cookie?: string) {
+  return fetch(`${SERVER_URL}/api/tickets/${id}/replies`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(cookie ? { Cookie: cookie } : {}) },
+    body: typeof body === "string" ? body : JSON.stringify(body),
+  });
+}

@@ -207,3 +207,55 @@ export const updateTicketSchema = z
   });
 
 export type UpdateTicketInput = z.infer<typeof updateTicketSchema>;
+
+/** The longest reply POST /api/tickets/:id/replies accepts, in characters. */
+export const REPLY_MAX_LENGTH = 10_000;
+
+const REPLY_REQUIRED_MESSAGE = "reply body is required";
+
+/**
+ * Characters that draw nothing on their own. trim() only removes whitespace, so
+ * a body of nothing but these would pass as text yet show as a blank reply:
+ * format characters (\p{Cf}: zero-width space and joiners, word joiner, soft
+ * hyphen, direction marks, BOM), combining marks with no base letter
+ * (\p{Mn}, \p{Me}), and the Hangul fillers and blank braille cell, which are
+ * letters and symbols by category but render empty.
+ */
+const INVISIBLE = /[\s\p{Cf}\p{Mn}\p{Me}ᅟᅠㅤﾠ⠀]/gu;
+
+/** Whether the text has at least one character that shows on screen. */
+const hasVisibleText = (text: string) => text.replace(INVISIBLE, "").length > 0;
+
+/**
+ * The length in characters as a person counts them — Unicode code points, so an
+ * emoji is one, not the two UTF-16 units String#length counts. Stated here
+ * rather than left to zod's `max`, whose counting is an implementation detail.
+ */
+const characterCount = (text: string) => [...text].length;
+
+/**
+ * The POST /api/tickets/:id/replies payload: a staff answer, as plain text. The
+ * body is trimmed, and one that shows nothing — empty, or only invisible
+ * characters — is refused rather than stored. A NUL byte is refused too:
+ * Postgres rejects it in a text column with an error, which would be a 500
+ * instead of this 400. Line breaks and other whitespace inside the body are
+ * kept — the thread shows them as written.
+ */
+export const createReplySchema = z.object(
+  {
+    body: z
+      .string({ error: REPLY_REQUIRED_MESSAGE })
+      .trim()
+      .refine(hasVisibleText, { error: REPLY_REQUIRED_MESSAGE })
+      .refine((body) => characterCount(body) <= REPLY_MAX_LENGTH, {
+        error: `reply body must be ${REPLY_MAX_LENGTH} characters or fewer`,
+      })
+      .refine((body) => !body.includes("\u0000"), {
+        error: "reply body cannot contain a NUL character",
+      }),
+  },
+  // A body that is not an object at all gets the API's wording, not zod's.
+  { error: REPLY_REQUIRED_MESSAGE },
+);
+
+export type CreateReplyInput = z.infer<typeof createReplySchema>;

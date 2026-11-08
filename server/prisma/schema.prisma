@@ -40,6 +40,10 @@ model User {
   // Tickets this user is working. Unassigned when the user is soft-deleted
   // (src/routes/users.ts), since deleted users are hidden from the API.
   assignedTickets Ticket[] @relation("TicketAssignee")
+
+  // Replies this user posted. Users are soft-deleted, so the rows stay and the
+  // author's name keeps showing on the thread.
+  replies Reply[]
 }
 
 model Session {
@@ -123,6 +127,7 @@ model Ticket {
   updatedAt  DateTime        @updatedAt
 
   messages Message[]
+  replies  Reply[]
 
   @@index([status, createdAt])
   @@index([createdAt]) // the ticket list's newest-first sort
@@ -148,4 +153,19 @@ model Message {
   receivedAt DateTime @default(now())
 
   @@index([ticketId, receivedAt])
+}
+
+// A staff answer to a ticket, posted from its detail page by a signed-in user.
+// Not a Message: those are inbound emails with an RFC Message-ID. Nothing is
+// emailed yet — outbound delivery (and a messageId here) comes with Phase 6.
+model Reply {
+  id        String   @id @default(uuid())
+  ticketId  Int
+  ticket    Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  authorId  String
+  author    User     @relation(fields: [authorId], references: [id])
+  body      String
+  createdAt DateTime @default(now())
+
+  @@index([ticketId, createdAt])
 }

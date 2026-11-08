@@ -129,7 +129,7 @@ describe("TicketsPage", () => {
     const user = userEvent.setup();
     fakeHttp((config) =>
       config.url === "/api/tickets/42"
-        ? { status: 200, data: { ticket: { ...ticket(42), messages: [] } } }
+        ? { status: 200, data: { ticket: { ...ticket(42), messages: [], replies: [] } } }
         : { status: 200, data: pageOf([ticket(42)], 2, 30) },
     );
     renderWithQuery(

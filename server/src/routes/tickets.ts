@@ -4,6 +4,7 @@
 import express from "express";
 import {
   TICKETS_PAGE_SIZE,
+  createReplySchema,
   ticketIdParamSchema,
   ticketListQuerySchema,
   updateTicketSchema,
@@ -20,6 +21,15 @@ export const ticketsRouter = express.Router();
 // What every ticket payload says about its assignee: enough to show and pick
 // them, never their email or role.
 const ASSIGNEE_SELECT = { select: { id: true, name: true } } as const;
+
+// A reply as every payload shows it. The author is shown like an assignee: by
+// name, never by email or role.
+const REPLY_SELECT = {
+  id: true,
+  body: true,
+  createdAt: true,
+  author: ASSIGNEE_SELECT,
+} as const;
 
 // One page at a time, narrowed by any filters (?category=…, from core's
 // TICKET_FILTERS) and in the order ?sort=&order= ask for (newest first when
@@ -90,7 +100,8 @@ ticketsRouter.get("/api/tickets/assignees", requireAuth, async (_req, res, next)
   }
 });
 
-// One ticket and its email thread, oldest message first. Same guard as the list.
+// One ticket, its email thread and its staff replies, each oldest first. Same
+// guard as the list.
 // The messages carry bodyText only: bodyHtml is untrusted inbound markup the
 // client must never render, so it stays out of the payload, as do the threading
 // headers (messageId, inReplyTo, references), which only the webhook needs.
@@ -122,6 +133,12 @@ ticketsRouter.get("/api/tickets/:id", requireAuth, async (req, res, next) => {
             bodyText: true,
             receivedAt: true,
           },
+        },
+        // The id breaks ties, so replies posted in the same millisecond keep
+        // one order across reloads.
+        replies: {
+          orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+          select: REPLY_SELECT,
         },
       },
     });
@@ -191,6 +208,44 @@ ticketsRouter.patch("/api/tickets/:id", requireAuth, async (req, res, next) => {
     }
     res.json({ ticket: updated });
   } catch (err) {
+    next(err);
+  }
+});
+
+// Posts a staff reply to the ticket, authored by whoever is signed in. Any
+// signed-in user may, as with PATCH: answering tickets is the agent's job.
+// Nothing is emailed yet — outbound delivery comes with Phase 6 — so this only
+// stores the reply for the thread.
+ticketsRouter.post("/api/tickets/:id/replies", requireAuth, async (req, res, next) => {
+  const id = ticketIdParamSchema.safeParse(req.params.id);
+  if (!id.success) {
+    res.status(400).json({ error: firstIssueMessage(id.error) });
+    return;
+  }
+  const body = createReplySchema.safeParse(req.body);
+  if (!body.success) {
+    res.status(400).json({ error: firstIssueMessage(body.error) });
+    return;
+  }
+
+  try {
+    const ticket = await prisma.ticket.findUnique({
+      where: { id: id.data },
+      select: { id: true },
+    });
+    if (!ticket) {
+      res.status(404).json({ error: "ticket not found" });
+      return;
+    }
+    const reply = await prisma.reply.create({
+      data: { ticketId: ticket.id, authorId: req.auth!.user.id, body: body.data.body },
+      select: REPLY_SELECT,
+    });
+    res.status(201).json({ reply });
+  } catch (err) {
+    // Nothing deletes tickets today, so the lookup above can't go stale before
+    // the insert. When ticket deletion lands, map the foreign-key miss (P2003)
+    // here to a 404 rather than this 500.
     next(err);
   }
 });

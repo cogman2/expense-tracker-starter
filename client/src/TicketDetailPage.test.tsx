@@ -1,13 +1,13 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { cleanup, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { TicketCategory, TicketStatus } from "core";
 import { renderWithQuery } from "./testRender";
 import { fakeHttp, httpCalls, restoreHttp, type FakeResponse } from "./testHttp";
 import { TicketDetailPage } from "./TicketDetailPage";
-import type { TicketAssignee, TicketDetail } from "./lib/api";
-import type { UpdateTicketInput } from "core";
+import type { TicketAssignee, TicketDetail, TicketReply } from "./lib/api";
+import { REPLY_MAX_LENGTH, type CreateReplyInput, type UpdateTicketInput } from "core";
 
 // Runs against the real lib/api module; only the network is faked, so these
 // specs also cover getTicket's URL.
@@ -38,11 +38,20 @@ const detail = (overrides: Partial<TicketDetail> = {}): TicketDetail => ({
       receivedAt: "2026-10-02T09:30:00.000Z",
     },
   ],
+  replies: [],
   ...overrides,
 });
 
 const ALEX: TicketAssignee = { id: "u1", name: "Alex Admin" };
 const SAM: TicketAssignee = { id: "u2", name: "Sam Agent" };
+
+/** What the real server answers a POST of `body` with, as signed-in Sam. */
+const replyFrom = (body: CreateReplyInput, id = "r-new"): TicketReply => ({
+  id,
+  body: body.body.trim(),
+  createdAt: "2026-10-03T10:00:00.000Z",
+  author: SAM,
+});
 
 /** Answers GET /api/tickets/:id. */
 let respond: () => FakeResponse;
@@ -50,6 +59,8 @@ let respond: () => FakeResponse;
 let respondAssignees: () => FakeResponse;
 /** Answers PATCH /api/tickets/:id, given the body sent. */
 let respondUpdate: (body: UpdateTicketInput) => FakeResponse | Promise<FakeResponse>;
+/** Answers POST /api/tickets/:id/replies, given the body sent. */
+let respondReply: (body: CreateReplyInput) => FakeResponse | Promise<FakeResponse>;
 
 /** What the real server answers a PATCH with: the ticket's editable fields, as saved. */
 function saved(body: UpdateTicketInput, ticket: TicketDetail = detail()): FakeResponse {
@@ -74,8 +85,10 @@ beforeEach(() => {
   respond = () => ({ status: 200, data: { ticket: detail() } });
   respondAssignees = () => ({ status: 200, data: { assignees: [ALEX, SAM] } });
   respondUpdate = (body) => saved(body);
+  respondReply = (body) => ({ status: 201, data: { reply: replyFrom(body) } });
   fakeHttp((config) => {
     if (config.method === "patch") return respondUpdate(JSON.parse(config.data));
+    if (config.method === "post") return respondReply(JSON.parse(config.data));
     if (config.url === "/api/tickets/assignees") return respondAssignees();
     return respond();
   });
@@ -171,6 +184,9 @@ describe("TicketDetailPage", () => {
 
   test("links back to the plain list when not opened from it", async () => {
     renderAt();
+    // The link renders before the ticket; let the ticket (and its reply form)
+    // settle so no update lands after the test ends.
+    await screen.findByRole("heading", { name: "Can't log in" });
 
     expect(await screen.findByRole("link", { name: /back to tickets/i })).toHaveAttribute(
       "href",
@@ -423,5 +439,200 @@ describe("TicketDetailPage concurrent saves", () => {
     // Gone wins over the copy already on screen.
     expect(await screen.findByText("Ticket not found.")).toBeInTheDocument();
     expect(screen.queryByRole("combobox", { name: "Status" })).toBeNull();
+  });
+});
+
+describe("TicketDetailPage replies", () => {
+  const OLDER: TicketReply = {
+    id: "r1",
+    body: "Hi Jane,\nTry resetting your password.",
+    createdAt: "2026-10-01T13:00:00.000Z",
+    author: ALEX,
+  };
+  const NEWER: TicketReply = {
+    id: "r2",
+    body: "Any luck?",
+    createdAt: "2026-10-02T10:00:00.000Z",
+    author: SAM,
+  };
+
+  const repliesList = () => screen.findByRole("list", { name: "Replies" });
+  const replyBox = () => screen.findByRole("textbox", { name: "Reply" });
+  const sendButton = () => screen.findByRole("button", { name: "Send reply" });
+  const postCalls = () => httpCalls().filter((call) => call.method === "post");
+
+  test("shows the replies below the messages, oldest first, by author", async () => {
+    respond = () => ({ status: 200, data: { ticket: detail({ replies: [OLDER, NEWER] }) } });
+    renderAt();
+
+    expect(await screen.findByRole("list", { name: "Messages" })).toBeInTheDocument();
+    const replies = within(await repliesList()).getAllByRole("listitem");
+    expect(replies).toHaveLength(2);
+    expect(replies[0]).toHaveTextContent("Alex Admin");
+    expect(replies[0]).toHaveTextContent("Try resetting your password.");
+    expect(replies[1]).toHaveTextContent("Sam Agent");
+    expect(replies[1]).toHaveTextContent("Any luck?");
+  });
+
+  test("says when there are no replies yet", async () => {
+    renderAt();
+
+    expect(await screen.findByText("No replies yet.")).toBeInTheDocument();
+    expect(screen.queryByRole("list", { name: "Replies" })).not.toBeInTheDocument();
+  });
+
+  test("refuses a blank reply without asking the server", async () => {
+    const user = userEvent.setup();
+    renderAt();
+
+    await user.type(await replyBox(), "   ");
+    await user.click(await sendButton());
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("reply body is required");
+    expect(postCalls()).toEqual([]);
+  });
+
+  test("keeps all of a paste over the limit and says it is too long", async () => {
+    const user = userEvent.setup();
+    renderAt();
+
+    // A maxLength would silently drop the overflow; the text must stay whole.
+    const tooLong = "a".repeat(REPLY_MAX_LENGTH + 50);
+    await user.click(await replyBox());
+    await user.paste(tooLong);
+    expect(await replyBox()).toHaveValue(tooLong);
+    await user.click(await sendButton());
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "reply body must be 10000 characters or fewer",
+    );
+    expect(postCalls()).toEqual([]);
+  });
+
+  test("two submits in the same tick post the reply once", async () => {
+    const user = userEvent.setup();
+    renderAt();
+
+    await user.type(await replyBox(), "Just once.");
+    // Both fire before React re-renders, so the disabled button can't stop the second.
+    const form = (await replyBox()).closest("form")!;
+    fireEvent.submit(form);
+    fireEvent.submit(form);
+
+    await waitFor(async () => expect(await replyBox()).toHaveValue(""));
+    expect(postCalls()).toHaveLength(1);
+  });
+
+  test("sending posts the trimmed body, adds the reply and clears the box", async () => {
+    const user = userEvent.setup();
+    // Like the real server, the refetch after posting sees the new reply.
+    let replies: TicketReply[] = [];
+    respond = () => ({ status: 200, data: { ticket: detail({ replies }) } });
+    respondReply = (body) => {
+      replies = [replyFrom(body)];
+      return { status: 201, data: { reply: replies[0] } };
+    };
+    renderAt();
+
+    await user.type(await replyBox(), "  Fixed it for you.  ");
+    await user.click(await sendButton());
+
+    const replyItems = within(await repliesList()).getAllByRole("listitem");
+    expect(replyItems).toHaveLength(1);
+    expect(replyItems[0]).toHaveTextContent("Sam Agent");
+    expect(replyItems[0]).toHaveTextContent("Fixed it for you.");
+    expect(postCalls().map((call) => [call.url, JSON.parse(call.data)])).toEqual([
+      ["/api/tickets/42/replies", { body: "Fixed it for you." }],
+    ]);
+    await waitFor(async () => expect(await replyBox()).toHaveValue(""));
+  });
+
+  test("disables sending while the reply is in flight", async () => {
+    const user = userEvent.setup();
+    respondReply = () => ({ status: 201, pending: true });
+    renderAt();
+
+    await user.type(await replyBox(), "On it.");
+    await user.click(await sendButton());
+
+    expect(await screen.findByRole("button", { name: "Sending…" })).toBeDisabled();
+    expect(await replyBox()).toHaveAttribute("readonly");
+  });
+
+  test("shows the server's message when sending fails, or a fallback without one, and keeps the text", async () => {
+    const user = userEvent.setup();
+    respondReply = () => ({ status: 404, data: { error: "ticket not found" } });
+    renderAt();
+
+    await user.type(await replyBox(), "Hello?");
+    await user.click(await sendButton());
+    expect(await screen.findByRole("alert")).toHaveTextContent("ticket not found");
+    expect(await replyBox()).toHaveValue("Hello?");
+
+    respondReply = () => ({ status: 500 });
+    await user.click(await sendButton());
+    await waitFor(async () =>
+      expect(await screen.findByRole("alert")).toHaveTextContent("Could not send the reply."),
+    );
+    expect(await replyBox()).toHaveValue("Hello?");
+  });
+
+  test("a successful retry clears the error from the failed send", async () => {
+    const user = userEvent.setup();
+    // Like the real server, later reads include the reply once it's stored.
+    let replies: TicketReply[] = [];
+    respond = () => ({ status: 200, data: { ticket: detail({ replies }) } });
+    let attempts = 0;
+    respondReply = (body) => {
+      if (++attempts === 1) return { status: 500, data: { error: "database unavailable" } };
+      replies = [replyFrom(body)];
+      return { status: 201, data: { reply: replies[0] } };
+    };
+    renderAt();
+
+    await user.type(await replyBox(), "Second time lucky.");
+    await user.click(await sendButton());
+    expect(await screen.findByRole("alert")).toHaveTextContent("database unavailable");
+
+    await user.click(await sendButton());
+
+    expect(within(await repliesList()).getByRole("listitem")).toHaveTextContent(
+      "Second time lucky.",
+    );
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(postCalls()).toHaveLength(2);
+  });
+
+  test("doesn't list the reply twice when a refetch brought it in first", async () => {
+    const user = userEvent.setup();
+    // Like the real server, the ticket includes the reply as soon as it's stored,
+    // but the POST's own answer is held back until the test releases it.
+    let replies: TicketReply[] = [];
+    respond = () => ({ status: 200, data: { ticket: detail({ replies }) } });
+    let release!: () => void;
+    respondReply = (body) => {
+      replies = [replyFrom(body)];
+      return new Promise<FakeResponse>((resolve) => {
+        release = () => resolve({ status: 201, data: { reply: replies[0] } });
+      });
+    };
+    renderAt();
+
+    await user.type(await replyBox(), "Only once, please.");
+    await user.click(await sendButton());
+    await waitFor(() => expect(postCalls()).toHaveLength(1));
+    // Saving the status refetches the ticket, which now has the reply.
+    await user.selectOptions(await statusSelect(), TicketStatus.resolved);
+    await waitFor(async () =>
+      expect(within(await repliesList()).getAllByRole("listitem")).toHaveLength(1),
+    );
+
+    // Hold the refetch that follows the send, so what's listed is exactly what
+    // the form wrote into the cache — a refetch would hide a duplicate.
+    respond = () => ({ status: 200, pending: true });
+    release();
+
+    await waitFor(async () => expect(await replyBox()).toHaveValue(""));
+    expect(within(await repliesList()).getAllByRole("listitem")).toHaveLength(1);
   });
 });

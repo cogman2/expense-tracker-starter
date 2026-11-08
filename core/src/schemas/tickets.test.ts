@@ -10,8 +10,10 @@ import {
   TicketStatus,
 } from "../constants/tickets";
 import {
+  createReplySchema,
   inboundEmailSchema,
   NO_SUBJECT,
+  REPLY_MAX_LENGTH,
   ticketIdParamSchema,
   ticketListQuerySchema,
   type TicketListQuery,
@@ -328,5 +330,80 @@ describe("updateTicketSchema", () => {
     for (const body of [undefined, null, [], "u1"]) {
       expect(messageFor(body), JSON.stringify(body)).toBe(EMPTY);
     }
+  });
+});
+
+describe("createReplySchema", () => {
+  const REQUIRED = "reply body is required";
+  const messageFor = (body: unknown) =>
+    createReplySchema.safeParse(body).error?.issues[0]?.message;
+
+  test("trims the body but keeps its inner line breaks", () => {
+    expect(createReplySchema.parse({ body: "  Hi Jane,\n\nTry again.  " })).toEqual({
+      body: "Hi Jane,\n\nTry again.",
+    });
+  });
+
+  test("strips unknown keys", () => {
+    expect(createReplySchema.parse({ body: "Hi", authorId: "u1" })).toEqual({ body: "Hi" });
+  });
+
+  test("rejects a missing, blank or non-string body", () => {
+    for (const body of [{}, { body: "" }, { body: " \n\t " }, { body: 7 }, { body: null }]) {
+      expect(messageFor(body), JSON.stringify(body)).toBe(REQUIRED);
+    }
+  });
+
+  test("rejects a payload that is not an object", () => {
+    for (const body of [null, "hi", ["hi"], 7]) {
+      expect(messageFor(body), JSON.stringify(body)).toBe(REQUIRED);
+    }
+  });
+
+  test(`takes up to ${REPLY_MAX_LENGTH} characters after trimming`, () => {
+    const longest = "a".repeat(REPLY_MAX_LENGTH);
+    expect(createReplySchema.parse({ body: ` ${longest} ` })).toEqual({ body: longest });
+    expect(messageFor({ body: `${longest}a` })).toBe(
+      "reply body must be 10000 characters or fewer",
+    );
+  });
+
+  test("counts the limit in characters, so an emoji is one, not two", () => {
+    const emoji = "\u{1F600}";
+    expect(createReplySchema.safeParse({ body: emoji.repeat(REPLY_MAX_LENGTH) }).success).toBe(
+      true,
+    );
+    expect(messageFor({ body: emoji.repeat(REPLY_MAX_LENGTH + 1) })).toBe(
+      "reply body must be 10000 characters or fewer",
+    );
+  });
+
+  test("rejects a body that shows nothing: only invisible characters", () => {
+    const invisible = {
+      "zero-width space": "​",
+      "zero-width joiners": "‌‍",
+      "word joiner": "⁠",
+      "soft hyphen": "­",
+      "direction marks": "‎‏",
+      "byte order mark": "﻿",
+      "lone combining marks": "́⃝",
+      "Hangul filler": "ㅤ",
+      "blank braille cell": "⠀",
+      "a mix, padded with spaces": " ​\nㅤ­ ",
+    };
+    for (const [name, body] of Object.entries(invisible)) {
+      expect(messageFor({ body }), name).toBe(REQUIRED);
+    }
+  });
+
+  test("keeps visible text that contains invisible characters", () => {
+    // A family emoji is joined with ZWJs; an accent can be a combining mark.
+    for (const body of ["\u{1F468}‍\u{1F469}‍\u{1F467}", "Résumé", "a​b"]) {
+      expect(createReplySchema.parse({ body })).toEqual({ body });
+    }
+  });
+
+  test("rejects a NUL character", () => {
+    expect(messageFor({ body: "a\u0000b" })).toBe("reply body cannot contain a NUL character");
   });
 });
