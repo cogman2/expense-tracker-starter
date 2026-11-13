@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { HttpError } from "../http-error";
 import { describeError } from "./error-handler";
 
 // Shaped like the errors body-parser raises (via http-errors).
@@ -6,6 +7,17 @@ const bodyError = (type: string, status: number) =>
   Object.assign(new Error("parser detail"), { type, status, expose: true });
 
 describe("describeError", () => {
+  test("an HttpError a route threw answers with its own status and message", () => {
+    expect(describeError(new HttpError(404, "ticket not found"))).toEqual({
+      status: 404,
+      error: "ticket not found",
+    });
+    expect(describeError(new HttpError(409, "admin users cannot be deleted"))).toEqual({
+      status: 409,
+      error: "admin users cannot be deleted",
+    });
+  });
+
   test("malformed JSON is a 400 with our own wording", () => {
     expect(describeError(bodyError("entity.parse.failed", 400))).toEqual({
       status: 400,

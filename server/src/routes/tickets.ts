@@ -12,7 +12,8 @@ import {
 import { prisma } from "../db";
 import { pageWindow } from "../pagination";
 import { requireAuth } from "../require-auth";
-import { firstIssueMessage } from "../schemas";
+import { HttpError } from "../http-error";
+import { parseBody, parseOrThrow } from "../schemas";
 import { activeFilters, ticketWhere } from "../ticket-filters";
 import { ticketOrderBy } from "../ticket-sort";
 
@@ -40,13 +41,9 @@ const REPLY_SELECT = {
 // end is an empty list, not an error. Explicit `select` keeps the payload to
 // what the list shows — no message bodies.
 ticketsRouter.get("/api/tickets", requireAuth, async (req, res) => {
-  const parsed = ticketListQuerySchema.safeParse(req.query);
-  if (!parsed.success) {
-    res.status(400).json({ error: firstIssueMessage(parsed.error) });
-    return;
-  }
-  const { page, sort, order } = parsed.data;
-  const filters = activeFilters(parsed.data);
+  const query = parseOrThrow(ticketListQuerySchema, req.query);
+  const { page, sort, order } = query;
+  const filters = activeFilters(query);
   const where = ticketWhere(filters);
 
   const [tickets, total] = await prisma.$transaction([
@@ -96,14 +93,10 @@ ticketsRouter.get("/api/tickets/assignees", requireAuth, async (_req, res) => {
 // client must never render, so it stays out of the payload, as do the threading
 // headers (messageId, inReplyTo, references), which only the webhook needs.
 ticketsRouter.get("/api/tickets/:id", requireAuth, async (req, res) => {
-  const parsed = ticketIdParamSchema.safeParse(req.params.id);
-  if (!parsed.success) {
-    res.status(400).json({ error: firstIssueMessage(parsed.error) });
-    return;
-  }
+  const id = parseOrThrow(ticketIdParamSchema, req.params.id);
 
   const ticket = await prisma.ticket.findUnique({
-    where: { id: parsed.data },
+    where: { id },
     select: {
       id: true,
       subject: true,
@@ -131,10 +124,7 @@ ticketsRouter.get("/api/tickets/:id", requireAuth, async (req, res) => {
       },
     },
   });
-  if (!ticket) {
-    res.status(404).json({ error: "ticket not found" });
-    return;
-  }
+  if (!ticket) throw new HttpError(404, "ticket not found");
   res.json({ ticket });
 });
 
@@ -151,27 +141,15 @@ ticketsRouter.get("/api/tickets/:id", requireAuth, async (req, res) => {
 // commit, then unassigns the ticket. Checked separately, a ticket could be left
 // assigned to a deleted user.
 ticketsRouter.patch("/api/tickets/:id", requireAuth, async (req, res) => {
-  const id = ticketIdParamSchema.safeParse(req.params.id);
-  if (!id.success) {
-    res.status(400).json({ error: firstIssueMessage(id.error) });
-    return;
-  }
-  const body = updateTicketSchema.safeParse(req.body ?? {});
-  if (!body.success) {
-    res.status(400).json({ error: firstIssueMessage(body.error) });
-    return;
-  }
+  const id = parseOrThrow(ticketIdParamSchema, req.params.id);
   // Undefined fields are skipped by Prisma, so only what was sent changes.
-  const { assigneeId, status, category } = body.data;
+  const { assigneeId, status, category } = parseBody(updateTicketSchema, req.body);
 
   const ticket = await prisma.ticket.findUnique({
-    where: { id: id.data },
+    where: { id },
     select: { id: true },
   });
-  if (!ticket) {
-    res.status(404).json({ error: "ticket not found" });
-    return;
-  }
+  if (!ticket) throw new HttpError(404, "ticket not found");
 
   const updated = await prisma.$transaction(async (tx) => {
     if (typeof assigneeId === "string") {
@@ -187,10 +165,7 @@ ticketsRouter.patch("/api/tickets/:id", requireAuth, async (req, res) => {
       select: { id: true, status: true, category: true, assignee: ASSIGNEE_SELECT },
     });
   });
-  if (!updated) {
-    res.status(400).json({ error: "assignee must be an active user" });
-    return;
-  }
+  if (!updated) throw new HttpError(400, "assignee must be an active user");
   res.json({ ticket: updated });
 });
 
@@ -199,30 +174,19 @@ ticketsRouter.patch("/api/tickets/:id", requireAuth, async (req, res) => {
 // Nothing is emailed yet — outbound delivery comes with Phase 6 — so this only
 // stores the reply for the thread.
 ticketsRouter.post("/api/tickets/:id/replies", requireAuth, async (req, res) => {
-  const id = ticketIdParamSchema.safeParse(req.params.id);
-  if (!id.success) {
-    res.status(400).json({ error: firstIssueMessage(id.error) });
-    return;
-  }
-  const body = createReplySchema.safeParse(req.body ?? {});
-  if (!body.success) {
-    res.status(400).json({ error: firstIssueMessage(body.error) });
-    return;
-  }
+  const id = parseOrThrow(ticketIdParamSchema, req.params.id);
+  const { body } = parseBody(createReplySchema, req.body);
 
   const ticket = await prisma.ticket.findUnique({
-    where: { id: id.data },
+    where: { id },
     select: { id: true },
   });
-  if (!ticket) {
-    res.status(404).json({ error: "ticket not found" });
-    return;
-  }
+  if (!ticket) throw new HttpError(404, "ticket not found");
   // Nothing deletes tickets today, so the lookup above can't go stale before
   // this insert. When ticket deletion lands, answer the foreign-key miss (P2003)
   // with a 404 rather than the error handler's 500.
   const reply = await prisma.reply.create({
-    data: { ticketId: ticket.id, authorId: req.auth!.user.id, body: body.data.body },
+    data: { ticketId: ticket.id, authorId: req.auth!.user.id, body },
     select: REPLY_SELECT,
   });
   res.status(201).json({ reply });

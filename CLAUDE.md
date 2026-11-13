@@ -40,11 +40,14 @@ duplication is what the package exists to prevent. In practice:
   (`core/src/users.test.ts`) — no database or DOM needed.
 - **Server (the authority)** — routes live in `server/src/routes/` (one module per
   resource, an `express.Router` mounted by `server/src/index.ts`, which keeps only
-  the wiring and the `/health` + `/ready` ops endpoints). They `safeParse` the body
-  against the core schema and answer `400 { error }` with
-  `firstIssueMessage(parsed.error)`
-  (`server/src/schemas.ts`); field order in the schema decides which message a
-  multiply-invalid body gets. Schemas normalize (trim the name, lowercase the
+  the wiring and the `/health` + `/ready` ops endpoints). They parse with
+  `parseBody(schema, req.body)` / `parseOrThrow(schema, req.params.id)`
+  (`server/src/schemas.ts`), which return the clean value or throw a 400 carrying
+  the first issue's message; field order in the schema decides which message a
+  multiply-invalid body gets. Other refusals `throw new HttpError(status,
+  message)` (`server/src/http-error.ts`). Express 5 hands anything a route throws
+  to `jsonErrorHandler`, which answers `{ error }`, so routes need no try/catch.
+  Schemas normalize (trim the name, lowercase the
   email) and narrow enums, so handlers work with clean, typed values. Where a core
   union must match a Prisma enum, assert it at compile time — see
   `RolesMatchPrisma` in `server/src/schemas.ts`.

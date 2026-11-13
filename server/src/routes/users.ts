@@ -12,7 +12,8 @@ import { canDeleteUser, createUserSchema, updateUserSchema } from "core";
 import { auth } from "../auth";
 import { prisma } from "../db";
 import { requireAuth, requireAdmin } from "../require-auth";
-import { firstIssueMessage } from "../schemas";
+import { HttpError } from "../http-error";
+import { parseBody } from "../schemas";
 
 export const usersRouter = express.Router();
 
@@ -54,20 +55,12 @@ usersRouter.post("/api/users", requireAuth, requireAdmin, async (req, res) => {
   // One schema shared with the client's form (core/src/users.ts). It trims the
   // name, lowercases the email and narrows the role, so everything below works
   // with clean values.
-  const parsed = createUserSchema.safeParse(req.body ?? {});
-  if (!parsed.success) {
-    res.status(400).json({ error: firstIssueMessage(parsed.error) });
-    return;
-  }
-  const { name, email, password, role } = parsed.data;
+  const { name, email, password, role } = parseBody(createUserSchema, req.body);
 
   const ctx = await auth.$context;
 
   const existing = await ctx.internalAdapter.findUserByEmail(email);
-  if (existing) {
-    res.status(409).json({ error: "a user with that email already exists" });
-    return;
-  }
+  if (existing) throw new HttpError(409, "a user with that email already exists");
 
   const user = await ctx.internalAdapter.createUser({
     email,
@@ -96,22 +89,14 @@ usersRouter.post("/api/users", requireAuth, requireAdmin, async (req, res) => {
 // directly, so anything Better Auth maintains alongside the row stays consistent.
 usersRouter.patch<{ id: string }>("/api/users/:id", requireAuth, requireAdmin, async (req, res) => {
   // Same schema the client's row editor validates against (core/src/users.ts).
-  const parsed = updateUserSchema.safeParse(req.body ?? {});
-  if (!parsed.success) {
-    res.status(400).json({ error: firstIssueMessage(parsed.error) });
-    return;
-  }
-  const { name, email, role } = parsed.data;
+  const { name, email, role } = parseBody(updateUserSchema, req.body);
 
   const ctx = await auth.$context;
 
   // A soft-deleted user is gone as far as the API is concerned. The adapter's
   // User type does not carry deletedAt, so that one column is read via Prisma.
   const target = await ctx.internalAdapter.findUserById(req.params.id);
-  if (!target || (await isDeleted(target.id))) {
-    res.status(404).json({ error: "user not found" });
-    return;
-  }
+  if (!target || (await isDeleted(target.id))) throw new HttpError(404, "user not found");
 
   // An admin demoting themselves would lose access to this very page (and could
   // strip the last admin), so it is refused rather than silently honored. Editing
@@ -120,15 +105,13 @@ usersRouter.patch<{ id: string }>("/api/users/:id", requireAuth, requireAdmin, a
   // session's user carries the role additionalField as a typed property.
   const isSelf = target.id === req.auth!.user.id;
   if (isSelf && role !== req.auth!.user.role) {
-    res.status(409).json({ error: "you cannot change your own role" });
-    return;
+    throw new HttpError(409, "you cannot change your own role");
   }
 
   // Scoped to *other* rows: an email left untouched must not collide with itself.
   const existing = await ctx.internalAdapter.findUserByEmail(email);
   if (existing && existing.user.id !== target.id) {
-    res.status(409).json({ error: "a user with that email already exists" });
-    return;
+    throw new HttpError(409, "a user with that email already exists");
   }
 
   const user = await ctx.internalAdapter.updateUser(target.id, {
@@ -155,15 +138,8 @@ usersRouter.delete<{ id: string }>("/api/users/:id", requireAuth, requireAdmin, 
     where: { id: req.params.id },
     select: { id: true, role: true, deletedAt: true },
   });
-  if (!target || target.deletedAt) {
-    res.status(404).json({ error: "user not found" });
-    return;
-  }
-
-  if (!canDeleteUser(target)) {
-    res.status(409).json({ error: "admin users cannot be deleted" });
-    return;
-  }
+  if (!target || target.deletedAt) throw new HttpError(404, "user not found");
+  if (!canDeleteUser(target)) throw new HttpError(409, "admin users cannot be deleted");
 
   // Their tickets go back to unassigned in the same transaction: a deleted user
   // is hidden from the API, so they could neither be shown nor reassigned from.

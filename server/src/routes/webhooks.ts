@@ -9,7 +9,7 @@ import { inboundEmailSchema } from "core";
 import { ingestEmail } from "../inbound";
 import { isForSupport, supportAddressFrom } from "../inbound-rules";
 import { requireWebhookSecret } from "../middleware/require-webhook-secret";
-import { firstIssueMessage } from "../schemas";
+import { parseBody } from "../schemas";
 
 export const webhooksRouter = express.Router();
 
@@ -21,11 +21,7 @@ webhooksRouter.post(
   requireWebhookSecret,
   express.json({ limit: "5mb" }),
   async (req, res) => {
-    const parsed = inboundEmailSchema.safeParse(req.body ?? {});
-    if (!parsed.success) {
-      res.status(400).json({ error: firstIssueMessage(parsed.error) });
-      return;
-    }
+    const email = parseBody(inboundEmailSchema, req.body);
 
     // Without a support address every email would look misaddressed and be
     // dropped below, so an unset one closes the webhook, like an unset secret.
@@ -38,7 +34,7 @@ webhooksRouter.post(
     // Mail that reached the webhook but is not for support (a CC'd alias, a
     // misrouted forward) is acknowledged with a 2xx so the sender does not retry
     // it, and dropped.
-    if (!isForSupport(parsed.data.to, supportAddress)) {
+    if (!isForSupport(email.to, supportAddress)) {
       res.status(202).json({ outcome: "ignored" });
       return;
     }
@@ -47,7 +43,7 @@ webhooksRouter.post(
     // this message and the failure is logged. A 500 tells it to retry; the
     // duplicate check makes that retry safe.
     try {
-      const { ticketId, outcome } = await ingestEmail(parsed.data);
+      const { ticketId, outcome } = await ingestEmail(email);
       res.status(outcome === "created" ? 201 : 200).json({ ticketId, outcome });
     } catch (err) {
       console.error("[webhooks] inbound email failed", err);

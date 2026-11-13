@@ -1,4 +1,5 @@
 import type { NextFunction, Request, Response } from "express";
+import { HttpError } from "../http-error";
 
 // Express's built-in fallback answers errors with an HTML page — in any
 // environment but production, one carrying the stack trace and absolute file
@@ -17,7 +18,7 @@ const BODY_ERROR_MESSAGES: Record<string, string> = {
   "request.size.invalid": "request size did not match content length",
 };
 
-interface HttpError {
+interface ExposableError {
   status?: unknown;
   statusCode?: unknown;
   expose?: unknown;
@@ -26,7 +27,11 @@ interface HttpError {
 
 /** The status and message to answer an error with. Pure, for unit tests. */
 export function describeError(err: unknown): { status: number; error: string } {
-  const e = (typeof err === "object" && err !== null ? err : {}) as HttpError;
+  // Thrown by a route on purpose: its status and message are the answer.
+  if (err instanceof HttpError) {
+    return { status: err.status, error: err.message };
+  }
+  const e = (typeof err === "object" && err !== null ? err : {}) as ExposableError;
   const status = Number(e.status ?? e.statusCode);
 
   // Only a client error the thrower marked safe to expose keeps its status;
