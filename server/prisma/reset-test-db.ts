@@ -22,11 +22,17 @@ if (!/test/i.test(dbName)) {
   );
 }
 
-// Better Auth data tables. CASCADE clears FK-linked rows; RESTART IDENTITY
-// resets sequences. The _prisma_migrations table is left intact.
-await prisma.$executeRawUnsafe(
-  'TRUNCATE TABLE "Message", "Ticket", "Customer", "User", "Session", "Account", "Verification" RESTART IDENTITY CASCADE',
-);
+// Every table in the schema except _prisma_migrations, read from the database
+// rather than listed here, so a new model's table is cleared without touching
+// this file. CASCADE clears FK-linked rows; RESTART IDENTITY resets sequences.
+// The names come from pg_tables, not from input, and are quoted as identifiers.
+const tables = await prisma.$queryRaw<{ tablename: string }[]>`
+  SELECT tablename FROM pg_tables
+  WHERE schemaname = 'public' AND tablename <> '_prisma_migrations'`;
+if (tables.length > 0) {
+  const list = tables.map(({ tablename }) => `"${tablename.replaceAll('"', '""')}"`).join(", ");
+  await prisma.$executeRawUnsafe(`TRUNCATE TABLE ${list} RESTART IDENTITY CASCADE`);
+}
 
 console.log(`[reset-test-db] truncated all data in "${dbName}"`);
 await prisma.$disconnect();

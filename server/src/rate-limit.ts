@@ -7,14 +7,13 @@ import rateLimit from "express-rate-limit";
 // Limits are env-overridable so they can be tuned per deployment without a code
 // change. Windows are in minutes; a value of 0 falls back to the default.
 
-function minutes(envVar: string, fallbackMinutes: number): number {
-  const raw = Number(process.env[envVar]);
-  return (Number.isFinite(raw) && raw > 0 ? raw : fallbackMinutes) * 60 * 1000;
-}
-
 function count(envVar: string, fallback: number): number {
   const raw = Number(process.env[envVar]);
   return Number.isFinite(raw) && raw > 0 ? raw : fallback;
+}
+
+function minutes(envVar: string, fallbackMinutes: number): number {
+  return count(envVar, fallbackMinutes) * 60 * 1000;
 }
 
 // Strict limiter for the login path — the brute-force target. Only failed

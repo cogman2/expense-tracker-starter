@@ -3,44 +3,24 @@
 // definition; what stays here is how a failed parse becomes an HTTP response, and
 // the guard that keeps core's role union tied to the database's.
 import type { z } from "zod";
-import { ROLES, TICKET_CATEGORIES, TICKET_STATUSES } from "core";
+import type { TicketCategoryValue, TicketStatusValue, UserRole } from "core";
 import { HttpError } from "./http-error";
+import type { Assert, SameMembers } from "./type-checks";
 import type {
   Role,
   TicketCategory as PrismaTicketCategory,
   TicketStatus as PrismaTicketStatus,
 } from "./generated/prisma/enums";
 
-// Compile-time check that core's ROLES and Prisma's Role enum are the same set,
-// in both directions: core cannot offer a role the column lacks, and a new role
-// in the schema cannot go unoffered. A mismatch fails `bun run typecheck` here
-// rather than at runtime in the adapter.
-type Assert<T extends true> = T;
-export type RolesMatchPrisma = Assert<
-  [Role] extends [(typeof ROLES)[number]]
-    ? [(typeof ROLES)[number]] extends [Role]
-      ? true
-      : false
-    : false
->;
-
-// The same guard for ticket statuses (core/src/constants/tickets.ts). Prisma's
-// enum is aliased because core exports its own `TicketStatus` constant.
-export type TicketStatusesMatchPrisma = Assert<
-  [PrismaTicketStatus] extends [(typeof TICKET_STATUSES)[number]]
-    ? [(typeof TICKET_STATUSES)[number]] extends [PrismaTicketStatus]
-      ? true
-      : false
-    : false
->;
-
-// And for ticket categories, aliased for the same reason.
+// Compile-time checks that core's unions and Prisma's enums are the same set,
+// in both directions: core cannot offer a role (status, category) the column
+// lacks, and a new one in the schema cannot go unoffered. A mismatch fails
+// `bun run typecheck` here rather than at runtime in the adapter. Prisma's
+// ticket enums are aliased because core exports constants with the same names.
+export type RolesMatchPrisma = Assert<SameMembers<Role, UserRole>>;
+export type TicketStatusesMatchPrisma = Assert<SameMembers<PrismaTicketStatus, TicketStatusValue>>;
 export type TicketCategoriesMatchPrisma = Assert<
-  [PrismaTicketCategory] extends [(typeof TICKET_CATEGORIES)[number]]
-    ? [(typeof TICKET_CATEGORIES)[number]] extends [PrismaTicketCategory]
-      ? true
-      : false
-    : false
+  SameMembers<PrismaTicketCategory, TicketCategoryValue>
 >;
 
 // The single message a failed parse answers with. Field order in the schema is

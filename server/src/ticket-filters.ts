@@ -5,6 +5,7 @@
 // change to this file. Type-only Prisma import.
 import { TICKET_FILTER_KEYS, type TicketFilterKey, type TicketFilterValue, type TicketFilterValues } from "core";
 import type { Prisma } from "./generated/prisma/client";
+import type { Assert } from "./type-checks";
 
 type TicketWhere = Prisma.TicketWhereInput;
 
@@ -24,7 +25,6 @@ export type ColumnAccepts<Column extends string, Value> = Column extends keyof T
 // whose values the column can't hold — makes one entry `false`, the union
 // `boolean`, and `bun run typecheck` fail here, which is what makes the cast in
 // ticketWhere safe.
-type Assert<T extends true> = T;
 type EveryFilterMatchesItsColumn = {
   [K in TicketFilterKey]: ColumnAccepts<K, TicketFilterValue<K>>;
 }[TicketFilterKey];
