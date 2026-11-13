@@ -10,6 +10,14 @@ export const ROLES = ["admin", "agent"] as const;
 export type UserRole = (typeof ROLES)[number];
 
 /**
+ * What any user id looks like: at least one character and no control
+ * characters. Ids are generated, so this can't tell a real one; it rules out
+ * input that can't be one — and that matters, because Postgres refuses a NUL
+ * byte in a query parameter with an error rather than a miss.
+ */
+export const USER_ID_PATTERN = /^\P{Cc}+$/u;
+
+/**
  * The roles by name, so code that means one particular role says `Role.admin`
  * rather than repeating the string. The `satisfies` clause keeps it exhaustive
  * and exact: a role added to ROLES fails to compile here until it is listed.

@@ -17,7 +17,7 @@ import { parseBody } from "../schemas";
 import {
   PUBLIC_USER_SELECT,
   createCredentialUser,
-  findActiveUser,
+  findActiveUserOr404,
   updateStaffUser,
 } from "../users";
 
@@ -64,8 +64,7 @@ usersRouter.patch<{ id: string }>("/api/users/:id", requireAuth, requireAdmin, a
   // Same schema the client's row editor validates against (core/src/users.ts).
   const input = parseBody(updateUserSchema, req.body);
 
-  const target = await findActiveUser(req.params.id);
-  if (!target) throw new HttpError(404, "user not found");
+  const target = await findActiveUserOr404(req.params.id);
 
   // An admin demoting themselves would lose access to this very page (and could
   // strip the last admin), so it is refused rather than silently honored. Editing
@@ -91,8 +90,7 @@ usersRouter.patch<{ id: string }>("/api/users/:id", requireAuth, requireAdmin, a
 // them become unassigned. Admin accounts cannot be deleted at all, which also
 // rules out deleting yourself.
 usersRouter.delete<{ id: string }>("/api/users/:id", requireAuth, requireAdmin, async (req, res) => {
-  const target = await findActiveUser(req.params.id);
-  if (!target) throw new HttpError(404, "user not found");
+  const target = await findActiveUserOr404(req.params.id);
   if (!canDeleteUser(target)) throw new HttpError(409, "admin users cannot be deleted");
 
   // Their tickets go back to unassigned in the same transaction: a deleted user

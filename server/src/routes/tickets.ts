@@ -92,7 +92,7 @@ ticketsRouter.get("/api/tickets", requireAuth, async (req, res) => {
 ticketsRouter.get("/api/tickets/assignees", requireAuth, async (_req, res) => {
   const assignees = await prisma.user.findMany({
     where: { deletedAt: null },
-    select: { id: true, name: true },
+    select: ASSIGNEE_SELECT.select,
     orderBy: [{ name: "asc" }, { id: "asc" }],
   });
   res.json({ assignees });

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { USER_ID_PATTERN } from "../users";
 import {
   SORT_ORDERS,
   SortOrder,
@@ -180,9 +181,8 @@ const EMPTY_UPDATE_MESSAGE = `provide at least one of: ${UPDATE_FIELDS.join(", "
  * least one field must be present, so an empty body is an error, not a no-op.
  *
  * The server also checks an assigneeId names an active user; that needs the
- * database. Control characters are refused here: no user id has one, and
- * Postgres rejects a NUL byte in a query parameter with an error rather than a
- * miss. Field order is the precedence a multiply-invalid body gets.
+ * database. Anything that can't be a user id (USER_ID_PATTERN, ../users.ts) is
+ * refused here. Field order is the precedence a multiply-invalid body gets.
  */
 export const updateTicketSchema = z
   .object(
@@ -191,7 +191,7 @@ export const updateTicketSchema = z
         .string({ error: ASSIGNEE_MESSAGE })
         .trim()
         .min(1, ASSIGNEE_MESSAGE)
-        .regex(/^\P{Cc}+$/u, ASSIGNEE_MESSAGE)
+        .regex(USER_ID_PATTERN, ASSIGNEE_MESSAGE)
         .nullable()
         .optional(),
       status: z.enum(TICKET_STATUSES, { error: STATUS_MESSAGE }).optional(),
