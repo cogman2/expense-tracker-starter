@@ -260,32 +260,9 @@ test.describe("POST /api/users input and race handling", () => {
     expect(await res.json()).toEqual({ error: "name is required" });
   });
 
-  // Several rounds: one burst often lets the duplicate check answer every
-  // request, so the insert-vs-insert race (once a 500) never happens.
-  test("concurrent creates of one new email give exactly one 201, the rest 409, one row", async () => {
-    const cookie = await signInAsAdmin();
-
-    for (let round = 0; round < 5; round++) {
-      const email = uniqueEmail(`race-create-${round}`);
-      const responses = await Promise.all(
-        Array.from({ length: 6 }, (_, i) =>
-          createUser(
-            { name: `Racer ${i}`, email, password: "password123", role: Role.agent },
-            cookie,
-          ),
-        ),
-      );
-
-      const statuses = responses.map((r) => r.status);
-      expect(statuses.filter((s) => s === 201)).toHaveLength(1);
-      expect(statuses.filter((s) => s === 409)).toHaveLength(5);
-      for (const res of responses.filter((r) => r.status === 409)) {
-        expect(await res.json()).toEqual({ error: "a user with that email already exists" });
-      }
-      expect(await db.user.count({ where: { email } })).toBe(1);
-    }
-  });
-
+  // Creates race each other and edits race the creates, so this guards both
+  // createCredentialUser's and updateStaffUser's handling of the unique index
+  // (each once a 500). Several rounds, since one burst rarely collides.
   test("creates racing PATCHes onto the same new email never 500 and leave one row", async () => {
     const cookie = await signInAsAdmin();
 

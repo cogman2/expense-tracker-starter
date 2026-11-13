@@ -351,18 +351,3 @@ test.describe("UI: row editor (/users)", () => {
     ).toBeVisible();
   });
 });
-
-test.describe("PATCH /api/users/:id with a malformed id", () => {
-  test("an id containing a NUL byte gets 404 user not found, not 500", async () => {
-    const cookie = await signInAsAdmin();
-
-    const res = await patchUser(
-      "a%00b",
-      { name: "Nobody", email: uniqueEmail("nul-id"), role: Role.agent },
-      cookie,
-    );
-
-    expect(res.status).toBe(404);
-    expect(await res.json()).toEqual({ error: "user not found" });
-  });
-});

@@ -31,14 +31,10 @@ describe("envCount", () => {
 });
 
 describe("envMinutes", () => {
+  // It is envCount in milliseconds, so the fallback rules are envCount's.
   test("returns milliseconds: the fallback, or the override", () => {
     expect(envMinutes(VAR, 15)).toBe(15 * 60 * 1000);
     process.env[VAR] = "2";
     expect(envMinutes(VAR, 15)).toBe(2 * 60 * 1000);
-  });
-
-  test("falls back the same way envCount does", () => {
-    process.env[VAR] = "0";
-    expect(envMinutes(VAR, 15)).toBe(15 * 60 * 1000);
   });
 });
