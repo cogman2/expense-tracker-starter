@@ -1,6 +1,9 @@
-import { describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, mock, spyOn, test } from "bun:test";
+import type { Server } from "node:http";
+import type { AddressInfo } from "node:net";
+import express, { type Request, type Response } from "express";
 import { HttpError } from "../http-error";
-import { describeError } from "./error-handler";
+import { describeError, jsonErrorHandler } from "./error-handler";
 
 // Shaped like the errors body-parser raises (via http-errors).
 const bodyError = (type: string, status: number) =>
@@ -70,5 +73,127 @@ describe("describeError", () => {
       error: "internal server error",
     });
     expect(describeError(null)).toEqual({ status: 500, error: "internal server error" });
+  });
+});
+
+// The middleware itself, mounted the way src/index.ts mounts it, on Express 5:
+// what a client actually receives when a route throws or rejects. Express 4
+// never passed a rejected async handler on, so these requests hung — this is
+// the guard against that coming back. No database: the routes fail on purpose.
+describe("jsonErrorHandler on a real Express app", () => {
+  let server: Server;
+  let base: string;
+
+  beforeAll(async () => {
+    const app = express();
+    app.use(express.json());
+    app.get("/sync-http-error", () => {
+      throw new HttpError(404, "ticket not found");
+    });
+    app.get("/async-http-error", async () => {
+      await Promise.resolve();
+      throw new HttpError(409, "admin users cannot be deleted");
+    });
+    app.get("/async-crash", async () => {
+      await Promise.resolve();
+      throw new Error("db password is hunter2");
+    });
+    app.post("/echo", (req, res) => {
+      res.json(req.body);
+    });
+    app.use(jsonErrorHandler);
+
+    server = await new Promise<Server>((resolve) => {
+      const s = app.listen(0, () => resolve(s));
+    });
+    base = `http://localhost:${(server.address() as AddressInfo).port}`;
+  });
+
+  afterAll(() => {
+    server.close();
+  });
+
+  async function answer(path: string, init?: RequestInit) {
+    const res = await fetch(base + path, { ...init, signal: AbortSignal.timeout(2000) });
+    return {
+      status: res.status,
+      type: res.headers.get("content-type") ?? "",
+      body: await res.json(),
+    };
+  }
+
+  test("a thrown HttpError answers with its status and message as JSON", async () => {
+    expect(await answer("/sync-http-error")).toMatchObject({
+      status: 404,
+      type: expect.stringContaining("application/json"),
+      body: { error: "ticket not found" },
+    });
+  });
+
+  test("an async route that rejects with an HttpError answers it, rather than hanging", async () => {
+    expect(await answer("/async-http-error")).toMatchObject({
+      status: 409,
+      body: { error: "admin users cannot be deleted" },
+    });
+  });
+
+  test("an async route that rejects with anything else is a JSON 500 that reveals nothing", async () => {
+    const logged = spyOn(console, "error").mockImplementation(() => {});
+    try {
+      expect(await answer("/async-crash")).toMatchObject({
+        status: 500,
+        type: expect.stringContaining("application/json"),
+        body: { error: "internal server error" },
+      });
+      // The cause still reaches the server log.
+      expect(logged).toHaveBeenCalledTimes(1);
+    } finally {
+      logged.mockRestore();
+    }
+  });
+
+  test("body-parser's malformed-JSON error reaches it too", async () => {
+    expect(
+      await answer("/echo", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: '{"oops":',
+      }),
+    ).toMatchObject({ status: 400, body: { error: "invalid JSON body" } });
+  });
+});
+
+describe("jsonErrorHandler", () => {
+  const req = {} as Request;
+  const stubResponse = (headersSent: boolean) => {
+    const res = { headersSent, status: mock(() => res), json: mock(() => res) };
+    return res;
+  };
+
+  test("a client error is answered without logging", () => {
+    const logged = spyOn(console, "error").mockImplementation(() => {});
+    const res = stubResponse(false);
+    const next = mock(() => {});
+    try {
+      jsonErrorHandler(new HttpError(404, "user not found"), req, res as unknown as Response, next);
+      expect(res.status).toHaveBeenCalledWith(404);
+      expect(res.json).toHaveBeenCalledWith({ error: "user not found" });
+      expect(next).not.toHaveBeenCalled();
+      expect(logged).not.toHaveBeenCalled();
+    } finally {
+      logged.mockRestore();
+    }
+  });
+
+  // Once a response has started, a JSON body can't follow it; Express's own
+  // handler is the one that can abort the connection.
+  test("after the headers are sent it hands the error to Express instead", () => {
+    const res = stubResponse(true);
+    const next = mock(() => {});
+    const err = new Error("failed mid-stream");
+    jsonErrorHandler(err, req, res as unknown as Response, next);
+    expect(next).toHaveBeenCalledWith(err);
+    expect(res.status).not.toHaveBeenCalled();
+    expect(res.json).not.toHaveBeenCalled();
   });
 });

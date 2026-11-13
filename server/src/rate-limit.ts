@@ -7,21 +7,23 @@ import rateLimit from "express-rate-limit";
 // Limits are env-overridable so they can be tuned per deployment without a code
 // change. Windows are in minutes; a value of 0 falls back to the default.
 
-function count(envVar: string, fallback: number): number {
+/** A positive number from the environment, or `fallback` when unset, junk or ≤ 0. */
+export function envCount(envVar: string, fallback: number): number {
   const raw = Number(process.env[envVar]);
   return Number.isFinite(raw) && raw > 0 ? raw : fallback;
 }
 
-function minutes(envVar: string, fallbackMinutes: number): number {
-  return count(envVar, fallbackMinutes) * 60 * 1000;
+/** envCount read as minutes and returned in milliseconds, as rateLimit's windowMs wants. */
+export function envMinutes(envVar: string, fallbackMinutes: number): number {
+  return envCount(envVar, fallbackMinutes) * 60 * 1000;
 }
 
 // Strict limiter for the login path — the brute-force target. Only failed
 // attempts count (skipSuccessfulRequests), so legitimate users signing in
 // normally are never locked out.
 export const signInRateLimiter = rateLimit({
-  windowMs: minutes("AUTH_RATE_LIMIT_SIGNIN_WINDOW_MIN", 15),
-  limit: count("AUTH_RATE_LIMIT_SIGNIN_MAX", 10),
+  windowMs: envMinutes("AUTH_RATE_LIMIT_SIGNIN_WINDOW_MIN", 15),
+  limit: envCount("AUTH_RATE_LIMIT_SIGNIN_MAX", 10),
   skipSuccessfulRequests: true,
   standardHeaders: "draft-7",
   legacyHeaders: false,
@@ -31,8 +33,8 @@ export const signInRateLimiter = rateLimit({
 // General limiter for the rest of /api/auth/*. Kept generous because the client
 // polls /api/auth/get-session, so a tight cap here would throttle real sessions.
 export const authRateLimiter = rateLimit({
-  windowMs: minutes("AUTH_RATE_LIMIT_WINDOW_MIN", 1),
-  limit: count("AUTH_RATE_LIMIT_MAX", 100),
+  windowMs: envMinutes("AUTH_RATE_LIMIT_WINDOW_MIN", 1),
+  limit: envCount("AUTH_RATE_LIMIT_MAX", 100),
   standardHeaders: "draft-7",
   legacyHeaders: false,
   message: { error: "too_many_requests" },
