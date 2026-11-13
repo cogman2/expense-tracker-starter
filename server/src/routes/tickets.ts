@@ -23,6 +23,18 @@ export const ticketsRouter = express.Router();
 // them, never their email or role.
 const ASSIGNEE_SELECT = { select: { id: true, name: true } } as const;
 
+// A ticket as the list shows it, and the part of the detail page above the
+// thread. Explicit fields keep message bodies (and everything else) out.
+const TICKET_ROW_SELECT = {
+  id: true,
+  subject: true,
+  status: true,
+  category: true,
+  createdAt: true,
+  customer: { select: { name: true, email: true } },
+  assignee: ASSIGNEE_SELECT,
+} as const;
+
 // A reply as every payload shows it. The author is shown like an assignee: by
 // name, never by email or role.
 const REPLY_SELECT = {
@@ -31,6 +43,13 @@ const REPLY_SELECT = {
   createdAt: true,
   author: ASSIGNEE_SELECT,
 } as const;
+
+/** The ticket's id, or a 404 when no ticket has it. For routes that write to one. */
+async function findTicketOr404(id: number): Promise<{ id: number }> {
+  const ticket = await prisma.ticket.findUnique({ where: { id }, select: { id: true } });
+  if (!ticket) throw new HttpError(404, "ticket not found");
+  return ticket;
+}
 
 // One page at a time, narrowed by any filters (?category=…, from core's
 // TICKET_FILTERS) and in the order ?sort=&order= ask for (newest first when
@@ -51,15 +70,7 @@ ticketsRouter.get("/api/tickets", requireAuth, async (req, res) => {
       where,
       orderBy: ticketOrderBy(sort, order),
       ...pageWindow(page, TICKETS_PAGE_SIZE),
-      select: {
-        id: true,
-        subject: true,
-        status: true,
-        category: true,
-        createdAt: true,
-        customer: { select: { name: true, email: true } },
-        assignee: ASSIGNEE_SELECT,
-      },
+      select: TICKET_ROW_SELECT,
     }),
     prisma.ticket.count({ where }),
   ]);
@@ -98,13 +109,7 @@ ticketsRouter.get("/api/tickets/:id", requireAuth, async (req, res) => {
   const ticket = await prisma.ticket.findUnique({
     where: { id },
     select: {
-      id: true,
-      subject: true,
-      status: true,
-      category: true,
-      createdAt: true,
-      customer: { select: { name: true, email: true } },
-      assignee: ASSIGNEE_SELECT,
+      ...TICKET_ROW_SELECT,
       messages: {
         orderBy: { receivedAt: "asc" },
         select: {
@@ -145,11 +150,7 @@ ticketsRouter.patch("/api/tickets/:id", requireAuth, async (req, res) => {
   // Undefined fields are skipped by Prisma, so only what was sent changes.
   const { assigneeId, status, category } = parseBody(updateTicketSchema, req.body);
 
-  const ticket = await prisma.ticket.findUnique({
-    where: { id },
-    select: { id: true },
-  });
-  if (!ticket) throw new HttpError(404, "ticket not found");
+  const ticket = await findTicketOr404(id);
 
   const updated = await prisma.$transaction(async (tx) => {
     if (typeof assigneeId === "string") {
@@ -177,11 +178,7 @@ ticketsRouter.post("/api/tickets/:id/replies", requireAuth, async (req, res) => 
   const id = parseOrThrow(ticketIdParamSchema, req.params.id);
   const { body } = parseBody(createReplySchema, req.body);
 
-  const ticket = await prisma.ticket.findUnique({
-    where: { id },
-    select: { id: true },
-  });
-  if (!ticket) throw new HttpError(404, "ticket not found");
+  const ticket = await findTicketOr404(id);
   // Nothing deletes tickets today, so the lookup above can't go stale before
   // this insert. When ticket deletion lands, answer the foreign-key miss (P2003)
   // with a 404 rather than the error handler's 500.
