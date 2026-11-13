@@ -54,7 +54,7 @@ usersRouter.post("/api/users", requireAuth, requireAdmin, async (req, res) => {
   // One schema shared with the client's form (core/src/users.ts). It trims the
   // name, lowercases the email and narrows the role, so everything below works
   // with clean values.
-  const parsed = createUserSchema.safeParse(req.body);
+  const parsed = createUserSchema.safeParse(req.body ?? {});
   if (!parsed.success) {
     res.status(400).json({ error: firstIssueMessage(parsed.error) });
     return;
@@ -94,9 +94,9 @@ usersRouter.post("/api/users", requireAuth, requireAdmin, async (req, res) => {
 // changing someone's credentials is a separate operation. Like the create route,
 // the work goes through Better Auth's internal adapter rather than Prisma
 // directly, so anything Better Auth maintains alongside the row stays consistent.
-usersRouter.patch("/api/users/:id", requireAuth, requireAdmin, async (req, res) => {
+usersRouter.patch<{ id: string }>("/api/users/:id", requireAuth, requireAdmin, async (req, res) => {
   // Same schema the client's row editor validates against (core/src/users.ts).
-  const parsed = updateUserSchema.safeParse(req.body);
+  const parsed = updateUserSchema.safeParse(req.body ?? {});
   if (!parsed.success) {
     res.status(400).json({ error: firstIssueMessage(parsed.error) });
     return;
@@ -150,7 +150,7 @@ usersRouter.patch("/api/users/:id", requireAuth, requireAdmin, async (req, res) 
 // hook in ../auth.ts keeps them from signing back in. Any tickets assigned to
 // them become unassigned. Admin accounts cannot be deleted at all, which also
 // rules out deleting yourself.
-usersRouter.delete("/api/users/:id", requireAuth, requireAdmin, async (req, res) => {
+usersRouter.delete<{ id: string }>("/api/users/:id", requireAuth, requireAdmin, async (req, res) => {
   const target = await prisma.user.findUnique({
     where: { id: req.params.id },
     select: { id: true, role: true, deletedAt: true },

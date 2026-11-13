@@ -37,7 +37,8 @@ if (process.env.NODE_ENV === "production") {
 
 // Better Auth mounts the entire /api/auth/* surface. It must be registered
 // before express.json(): the handler consumes the raw request body itself.
-app.all("/api/auth/*", toNodeHandler(auth));
+// Express 5 names its wildcards: "*splat" matches the rest of the path.
+app.all("/api/auth/*splat", toNodeHandler(auth));
 
 // Above the global JSON parser on purpose: inbound emails can be megabytes, and
 // once express.json() has read a body (100 KB default) the webhook's own larger
@@ -84,7 +85,8 @@ app.use(ticketsRouter);
 
 // Last, so it catches errors from every route above — including body-parser's
 // for malformed or oversized JSON, which Express would otherwise answer with an
-// HTML page (with a stack trace outside production).
+// HTML page (with a stack trace outside production). Express 5 also hands it any
+// error an async route throws or rejects with, so routes need no try/catch.
 app.use(jsonErrorHandler);
 
 const server = app.listen(PORT, () => {

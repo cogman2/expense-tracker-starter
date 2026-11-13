@@ -39,7 +39,7 @@ const REPLY_SELECT = {
 // ties by id, so a ticket can't appear on two pages or on none. A page past the
 // end is an empty list, not an error. Explicit `select` keeps the payload to
 // what the list shows — no message bodies.
-ticketsRouter.get("/api/tickets", requireAuth, async (req, res, next) => {
+ticketsRouter.get("/api/tickets", requireAuth, async (req, res) => {
   const parsed = ticketListQuerySchema.safeParse(req.query);
   if (!parsed.success) {
     res.status(400).json({ error: firstIssueMessage(parsed.error) });
@@ -49,72 +49,11 @@ ticketsRouter.get("/api/tickets", requireAuth, async (req, res, next) => {
   const filters = activeFilters(parsed.data);
   const where = ticketWhere(filters);
 
-  // Express 4 does not catch a rejected async handler; hand a database failure
-  // to the JSON error handler (src/middleware/error-handler.ts) as a 500.
-  try {
-    const [tickets, total] = await prisma.$transaction([
-      prisma.ticket.findMany({
-        where,
-        orderBy: ticketOrderBy(sort, order),
-        ...pageWindow(page, TICKETS_PAGE_SIZE),
-        select: {
-          id: true,
-          subject: true,
-          status: true,
-          category: true,
-          createdAt: true,
-          customer: { select: { name: true, email: true } },
-          assignee: ASSIGNEE_SELECT,
-        },
-      }),
-      prisma.ticket.count({ where }),
-    ]);
-
-    res.json({
-      tickets,
-      total,
-      page,
-      pageSize: TICKETS_PAGE_SIZE,
-      sort,
-      order,
-      filters,
-    });
-  } catch (err) {
-    next(err);
-  }
-});
-
-// The staff a ticket can be assigned to: every active user, admin or agent, by
-// name. Registered before /api/tickets/:id, which would otherwise take
-// "assignees" as an id and answer 400.
-ticketsRouter.get("/api/tickets/assignees", requireAuth, async (_req, res, next) => {
-  try {
-    const assignees = await prisma.user.findMany({
-      where: { deletedAt: null },
-      select: { id: true, name: true },
-      orderBy: [{ name: "asc" }, { id: "asc" }],
-    });
-    res.json({ assignees });
-  } catch (err) {
-    next(err);
-  }
-});
-
-// One ticket, its email thread and its staff replies, each oldest first. Same
-// guard as the list.
-// The messages carry bodyText only: bodyHtml is untrusted inbound markup the
-// client must never render, so it stays out of the payload, as do the threading
-// headers (messageId, inReplyTo, references), which only the webhook needs.
-ticketsRouter.get("/api/tickets/:id", requireAuth, async (req, res, next) => {
-  const parsed = ticketIdParamSchema.safeParse(req.params.id);
-  if (!parsed.success) {
-    res.status(400).json({ error: firstIssueMessage(parsed.error) });
-    return;
-  }
-
-  try {
-    const ticket = await prisma.ticket.findUnique({
-      where: { id: parsed.data },
+  const [tickets, total] = await prisma.$transaction([
+    prisma.ticket.findMany({
+      where,
+      orderBy: ticketOrderBy(sort, order),
+      ...pageWindow(page, TICKETS_PAGE_SIZE),
       select: {
         id: true,
         subject: true,
@@ -123,33 +62,80 @@ ticketsRouter.get("/api/tickets/:id", requireAuth, async (req, res, next) => {
         createdAt: true,
         customer: { select: { name: true, email: true } },
         assignee: ASSIGNEE_SELECT,
-        messages: {
-          orderBy: { receivedAt: "asc" },
-          select: {
-            id: true,
-            fromEmail: true,
-            fromName: true,
-            subject: true,
-            bodyText: true,
-            receivedAt: true,
-          },
-        },
-        // The id breaks ties, so replies posted in the same millisecond keep
-        // one order across reloads.
-        replies: {
-          orderBy: [{ createdAt: "asc" }, { id: "asc" }],
-          select: REPLY_SELECT,
+      },
+    }),
+    prisma.ticket.count({ where }),
+  ]);
+
+  res.json({
+    tickets,
+    total,
+    page,
+    pageSize: TICKETS_PAGE_SIZE,
+    sort,
+    order,
+    filters,
+  });
+});
+
+// The staff a ticket can be assigned to: every active user, admin or agent, by
+// name. Registered before /api/tickets/:id, which would otherwise take
+// "assignees" as an id and answer 400.
+ticketsRouter.get("/api/tickets/assignees", requireAuth, async (_req, res) => {
+  const assignees = await prisma.user.findMany({
+    where: { deletedAt: null },
+    select: { id: true, name: true },
+    orderBy: [{ name: "asc" }, { id: "asc" }],
+  });
+  res.json({ assignees });
+});
+
+// One ticket, its email thread and its staff replies, each oldest first. Same
+// guard as the list.
+// The messages carry bodyText only: bodyHtml is untrusted inbound markup the
+// client must never render, so it stays out of the payload, as do the threading
+// headers (messageId, inReplyTo, references), which only the webhook needs.
+ticketsRouter.get("/api/tickets/:id", requireAuth, async (req, res) => {
+  const parsed = ticketIdParamSchema.safeParse(req.params.id);
+  if (!parsed.success) {
+    res.status(400).json({ error: firstIssueMessage(parsed.error) });
+    return;
+  }
+
+  const ticket = await prisma.ticket.findUnique({
+    where: { id: parsed.data },
+    select: {
+      id: true,
+      subject: true,
+      status: true,
+      category: true,
+      createdAt: true,
+      customer: { select: { name: true, email: true } },
+      assignee: ASSIGNEE_SELECT,
+      messages: {
+        orderBy: { receivedAt: "asc" },
+        select: {
+          id: true,
+          fromEmail: true,
+          fromName: true,
+          subject: true,
+          bodyText: true,
+          receivedAt: true,
         },
       },
-    });
-    if (!ticket) {
-      res.status(404).json({ error: "ticket not found" });
-      return;
-    }
-    res.json({ ticket });
-  } catch (err) {
-    next(err);
+      // The id breaks ties, so replies posted in the same millisecond keep
+      // one order across reloads.
+      replies: {
+        orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+        select: REPLY_SELECT,
+      },
+    },
+  });
+  if (!ticket) {
+    res.status(404).json({ error: "ticket not found" });
+    return;
   }
+  res.json({ ticket });
 });
 
 // A partial update of the ticket: its assignee ({ assigneeId: null } unassigns),
@@ -164,13 +150,13 @@ ticketsRouter.get("/api/tickets/:id", requireAuth, async (req, res, next) => {
 // and the user then reads as gone (400); one that starts after waits for this
 // commit, then unassigns the ticket. Checked separately, a ticket could be left
 // assigned to a deleted user.
-ticketsRouter.patch("/api/tickets/:id", requireAuth, async (req, res, next) => {
+ticketsRouter.patch("/api/tickets/:id", requireAuth, async (req, res) => {
   const id = ticketIdParamSchema.safeParse(req.params.id);
   if (!id.success) {
     res.status(400).json({ error: firstIssueMessage(id.error) });
     return;
   }
-  const body = updateTicketSchema.safeParse(req.body);
+  const body = updateTicketSchema.safeParse(req.body ?? {});
   if (!body.success) {
     res.status(400).json({ error: firstIssueMessage(body.error) });
     return;
@@ -178,74 +164,66 @@ ticketsRouter.patch("/api/tickets/:id", requireAuth, async (req, res, next) => {
   // Undefined fields are skipped by Prisma, so only what was sent changes.
   const { assigneeId, status, category } = body.data;
 
-  try {
-    const ticket = await prisma.ticket.findUnique({
-      where: { id: id.data },
-      select: { id: true },
-    });
-    if (!ticket) {
-      res.status(404).json({ error: "ticket not found" });
-      return;
-    }
-
-    const updated = await prisma.$transaction(async (tx) => {
-      if (typeof assigneeId === "string") {
-        const active = await tx.$queryRaw<{ id: string }[]>`
-          SELECT "id" FROM "User"
-          WHERE "id" = ${assigneeId} AND "deletedAt" IS NULL
-          FOR SHARE`;
-        if (active.length === 0) return null;
-      }
-      return tx.ticket.update({
-        where: { id: ticket.id },
-        data: { assigneeId, status, category },
-        select: { id: true, status: true, category: true, assignee: ASSIGNEE_SELECT },
-      });
-    });
-    if (!updated) {
-      res.status(400).json({ error: "assignee must be an active user" });
-      return;
-    }
-    res.json({ ticket: updated });
-  } catch (err) {
-    next(err);
+  const ticket = await prisma.ticket.findUnique({
+    where: { id: id.data },
+    select: { id: true },
+  });
+  if (!ticket) {
+    res.status(404).json({ error: "ticket not found" });
+    return;
   }
+
+  const updated = await prisma.$transaction(async (tx) => {
+    if (typeof assigneeId === "string") {
+      const active = await tx.$queryRaw<{ id: string }[]>`
+        SELECT "id" FROM "User"
+        WHERE "id" = ${assigneeId} AND "deletedAt" IS NULL
+        FOR SHARE`;
+      if (active.length === 0) return null;
+    }
+    return tx.ticket.update({
+      where: { id: ticket.id },
+      data: { assigneeId, status, category },
+      select: { id: true, status: true, category: true, assignee: ASSIGNEE_SELECT },
+    });
+  });
+  if (!updated) {
+    res.status(400).json({ error: "assignee must be an active user" });
+    return;
+  }
+  res.json({ ticket: updated });
 });
 
 // Posts a staff reply to the ticket, authored by whoever is signed in. Any
 // signed-in user may, as with PATCH: answering tickets is the agent's job.
 // Nothing is emailed yet — outbound delivery comes with Phase 6 — so this only
 // stores the reply for the thread.
-ticketsRouter.post("/api/tickets/:id/replies", requireAuth, async (req, res, next) => {
+ticketsRouter.post("/api/tickets/:id/replies", requireAuth, async (req, res) => {
   const id = ticketIdParamSchema.safeParse(req.params.id);
   if (!id.success) {
     res.status(400).json({ error: firstIssueMessage(id.error) });
     return;
   }
-  const body = createReplySchema.safeParse(req.body);
+  const body = createReplySchema.safeParse(req.body ?? {});
   if (!body.success) {
     res.status(400).json({ error: firstIssueMessage(body.error) });
     return;
   }
 
-  try {
-    const ticket = await prisma.ticket.findUnique({
-      where: { id: id.data },
-      select: { id: true },
-    });
-    if (!ticket) {
-      res.status(404).json({ error: "ticket not found" });
-      return;
-    }
-    const reply = await prisma.reply.create({
-      data: { ticketId: ticket.id, authorId: req.auth!.user.id, body: body.data.body },
-      select: REPLY_SELECT,
-    });
-    res.status(201).json({ reply });
-  } catch (err) {
-    // Nothing deletes tickets today, so the lookup above can't go stale before
-    // the insert. When ticket deletion lands, map the foreign-key miss (P2003)
-    // here to a 404 rather than this 500.
-    next(err);
+  const ticket = await prisma.ticket.findUnique({
+    where: { id: id.data },
+    select: { id: true },
+  });
+  if (!ticket) {
+    res.status(404).json({ error: "ticket not found" });
+    return;
   }
+  // Nothing deletes tickets today, so the lookup above can't go stale before
+  // this insert. When ticket deletion lands, answer the foreign-key miss (P2003)
+  // with a 404 rather than the error handler's 500.
+  const reply = await prisma.reply.create({
+    data: { ticketId: ticket.id, authorId: req.auth!.user.id, body: body.data.body },
+    select: REPLY_SELECT,
+  });
+  res.status(201).json({ reply });
 });

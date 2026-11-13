@@ -21,7 +21,7 @@ webhooksRouter.post(
   requireWebhookSecret,
   express.json({ limit: "5mb" }),
   async (req, res) => {
-    const parsed = inboundEmailSchema.safeParse(req.body);
+    const parsed = inboundEmailSchema.safeParse(req.body ?? {});
     if (!parsed.success) {
       res.status(400).json({ error: firstIssueMessage(parsed.error) });
       return;
@@ -43,9 +43,9 @@ webhooksRouter.post(
       return;
     }
 
-    // Express 4 does not catch a rejected async handler, which would leave the
-    // sender's request hanging. A 500 tells it to retry; the duplicate check makes
-    // that retry safe.
+    // Caught here rather than left to the JSON error handler so the sender gets
+    // this message and the failure is logged. A 500 tells it to retry; the
+    // duplicate check makes that retry safe.
     try {
       const { ticketId, outcome } = await ingestEmail(parsed.data);
       res.status(outcome === "created" ? 201 : 200).json({ ticketId, outcome });
