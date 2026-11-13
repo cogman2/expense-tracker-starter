@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { db } from "./db";
 import { ADMIN, AGENT, loginAndWaitForHome } from "./auth-helpers";
 import { Role } from "core";
 
@@ -239,5 +240,89 @@ test.describe("UI: Create user form (/users)", () => {
     await expect(
       page.getByText("a user with that email already exists"),
     ).toBeVisible();
+  });
+});
+
+test.describe("POST /api/users input and race handling", () => {
+  test.afterAll(async () => {
+    await db.$disconnect();
+  });
+
+  test("a non-object JSON body (an array) gets 400 name is required", async () => {
+    const cookie = await signInAsAdmin();
+    const res = await fetch(`${SERVER_URL}/api/users`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: cookie },
+      body: "[]",
+    });
+
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "name is required" });
+  });
+
+  // Several rounds: one burst often lets the duplicate check answer every
+  // request, so the insert-vs-insert race (once a 500) never happens.
+  test("concurrent creates of one new email give exactly one 201, the rest 409, one row", async () => {
+    const cookie = await signInAsAdmin();
+
+    for (let round = 0; round < 5; round++) {
+      const email = uniqueEmail(`race-create-${round}`);
+      const responses = await Promise.all(
+        Array.from({ length: 6 }, (_, i) =>
+          createUser(
+            { name: `Racer ${i}`, email, password: "password123", role: Role.agent },
+            cookie,
+          ),
+        ),
+      );
+
+      const statuses = responses.map((r) => r.status);
+      expect(statuses.filter((s) => s === 201)).toHaveLength(1);
+      expect(statuses.filter((s) => s === 409)).toHaveLength(5);
+      for (const res of responses.filter((r) => r.status === 409)) {
+        expect(await res.json()).toEqual({ error: "a user with that email already exists" });
+      }
+      expect(await db.user.count({ where: { email } })).toBe(1);
+    }
+  });
+
+  test("creates racing PATCHes onto the same new email never 500 and leave one row", async () => {
+    const cookie = await signInAsAdmin();
+
+    for (let round = 0; round < 3; round++) {
+      const email = uniqueEmail(`race-mixed-${round}`);
+      const targets = await Promise.all(
+        [0, 1, 2].map(async (i) => {
+          const res = await createUser(
+            {
+              name: `Mover ${round}${i}`,
+              email: uniqueEmail(`mover-${round}-${i}`),
+              password: "password123",
+              role: Role.agent,
+            },
+            cookie,
+          );
+          expect(res.status).toBe(201);
+          return ((await res.json()) as { user: { id: string } }).user.id;
+        }),
+      );
+
+      const creates = [0, 1, 2].map((i) =>
+        createUser({ name: `Racer ${i}`, email, password: "password123", role: Role.agent }, cookie),
+      );
+      const patches = targets.map((id) =>
+        fetch(`${SERVER_URL}/api/users/${id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json", Cookie: cookie },
+          body: JSON.stringify({ name: "Moved", email, role: Role.agent }),
+        }),
+      );
+      const responses = await Promise.all([...creates, ...patches]);
+
+      for (const res of responses) {
+        expect([200, 201, 409]).toContain(res.status);
+      }
+      expect(await db.user.count({ where: { email } })).toBe(1);
+    }
   });
 });

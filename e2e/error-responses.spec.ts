@@ -1,4 +1,7 @@
 import { expect, test } from "@playwright/test";
+import http from "node:http";
+import { signInCookie } from "./api-helpers";
+import { AGENT } from "./auth-helpers";
 import { db } from "./db";
 import { buildEmail } from "./inbound-helpers";
 import { TEST_WEBHOOK_SECRET } from "./webhook-env";
@@ -84,5 +87,35 @@ test.describe("global body parser errors", () => {
   test("POST /api/users with a ~200 KB body gets 413 request body too large", async () => {
     const res = await post(USERS_URL, jsonOfSize(200 * 1024));
     await expectJsonError(res, 413, "request body too large");
+  });
+});
+
+test.describe("path param errors", () => {
+  test("malformed percent-encoding in a path param gets 400 malformed URL", async () => {
+    const cookie = await signInCookie(AGENT.email, AGENT.password);
+    // fetch() may normalize the URL, so send the raw request line ourselves.
+    const { status, contentType, body } = await new Promise<{
+      status: number | undefined;
+      contentType: string | undefined;
+      body: string;
+    }>((resolve, reject) => {
+      const req = http.request(
+        { host: "localhost", port: 3000, path: "/api/tickets/%E0%A4%A", headers: { Cookie: cookie } },
+        (res) => {
+          let data = "";
+          res.setEncoding("utf8");
+          res.on("data", (chunk: string) => (data += chunk));
+          res.on("end", () =>
+            resolve({ status: res.statusCode, contentType: res.headers["content-type"], body: data }),
+          );
+        },
+      );
+      req.on("error", reject);
+      req.end();
+    });
+
+    expect(status).toBe(400);
+    expect(contentType).toContain("application/json");
+    expect(JSON.parse(body)).toEqual({ error: "malformed URL" });
   });
 });

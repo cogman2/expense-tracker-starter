@@ -34,6 +34,13 @@ export function describeError(err: unknown): { status: number; error: string } {
   const e = (typeof err === "object" && err !== null ? err : {}) as ExposableError;
   const status = Number(e.status ?? e.statusCode);
 
+  // A path param that isn't valid percent-encoding (/api/tickets/%E0%A4%A).
+  // The router marks it 400 but not `expose`, since its message echoes the raw
+  // param; it is the client's mistake, so it gets our wording, not a 500.
+  if (err instanceof URIError && status === 400) {
+    return { status: 400, error: "malformed URL" };
+  }
+
   // Only a client error the thrower marked safe to expose keeps its status;
   // anything else is reported as a server error, with nothing about its cause.
   if (e.expose === true && status >= 400 && status < 500) {

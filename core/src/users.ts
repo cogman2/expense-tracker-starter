@@ -44,27 +44,32 @@ export function canDeleteUser(user: { role: UserRole }): boolean {
  * Field order is meaningful: the server answers with the first issue only, so this
  * order is the precedence a multiply-invalid body gets.
  */
-export const createUserSchema = z.object({
-  name: z.string({ error: "name is required" }).trim().min(1, "name is required"),
-  // Trim and lowercase BEFORE the format check. z.email() is its own schema
-  // rather than a check on ZodString, so chaining .trim() onto it would validate
-  // the untrimmed value — hence the pipe. Lowercasing here is what keeps the
-  // duplicate-email check and later sign-ins agreeing on one spelling.
-  email: z
-    .string({ error: "a valid email is required" })
-    .trim()
-    .toLowerCase()
-    .pipe(z.email("a valid email is required")),
-  password: z
-    .string({
-      error: `password must be at least ${MIN_PASSWORD_LENGTH} characters`,
-    })
-    .min(
-      MIN_PASSWORD_LENGTH,
-      `password must be at least ${MIN_PASSWORD_LENGTH} characters`,
-    ),
-  role: z.enum(ROLES, { error: `role must be one of ${ROLES.join(", ")}` }),
-});
+export const createUserSchema = z.object(
+  {
+    name: z.string({ error: "name is required" }).trim().min(1, "name is required"),
+    // Trim and lowercase BEFORE the format check. z.email() is its own schema
+    // rather than a check on ZodString, so chaining .trim() onto it would validate
+    // the untrimmed value — hence the pipe. Lowercasing here is what keeps the
+    // duplicate-email check and later sign-ins agreeing on one spelling.
+    email: z
+      .string({ error: "a valid email is required" })
+      .trim()
+      .toLowerCase()
+      .pipe(z.email("a valid email is required")),
+    password: z
+      .string({
+        error: `password must be at least ${MIN_PASSWORD_LENGTH} characters`,
+      })
+      .min(
+        MIN_PASSWORD_LENGTH,
+        `password must be at least ${MIN_PASSWORD_LENGTH} characters`,
+      ),
+    role: z.enum(ROLES, { error: `role must be one of ${ROLES.join(", ")}` }),
+  },
+  // A body that is not an object at all (an array, a string, null) gets the
+  // same answer as an empty one — the first field's message — not zod's wording.
+  { error: "name is required" },
+);
 
 /** The parsed payload: trimmed name, lowercased email, narrowed role. */
 export type CreateUserInput = z.infer<typeof createUserSchema>;

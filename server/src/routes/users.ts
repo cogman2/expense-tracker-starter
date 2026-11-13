@@ -18,7 +18,7 @@ import {
   PUBLIC_USER_SELECT,
   createCredentialUser,
   findActiveUser,
-  toPublicUser,
+  updateStaffUser,
 } from "../users";
 
 export const usersRouter = express.Router();
@@ -62,9 +62,7 @@ usersRouter.post("/api/users", requireAuth, requireAdmin, async (req, res) => {
 // directly, so anything Better Auth maintains alongside the row stays consistent.
 usersRouter.patch<{ id: string }>("/api/users/:id", requireAuth, requireAdmin, async (req, res) => {
   // Same schema the client's row editor validates against (core/src/users.ts).
-  const { name, email, role } = parseBody(updateUserSchema, req.body);
-
-  const ctx = await auth.$context;
+  const input = parseBody(updateUserSchema, req.body);
 
   const target = await findActiveUser(req.params.id);
   if (!target) throw new HttpError(404, "user not found");
@@ -75,26 +73,15 @@ usersRouter.patch<{ id: string }>("/api/users/:id", requireAuth, requireAdmin, a
   // rather than `target`: inside this branch they are the same row, and the
   // session's user carries the role additionalField as a typed property.
   const isSelf = target.id === req.auth!.user.id;
-  if (isSelf && role !== req.auth!.user.role) {
+  if (isSelf && input.role !== req.auth!.user.role) {
     throw new HttpError(409, "you cannot change your own role");
   }
 
-  // Scoped to *other* rows: an email left untouched must not collide with itself.
-  const existing = await ctx.internalAdapter.findUserByEmail(email);
-  if (existing && existing.user.id !== target.id) {
-    throw new HttpError(409, "a user with that email already exists");
-  }
-
-  const user = await ctx.internalAdapter.updateUser(target.id, {
-    name,
-    email,
-    role,
-  });
-
+  const user = await updateStaffUser(target.id, input);
+  if (!user) throw new HttpError(409, "a user with that email already exists");
   // No createdAt — the list endpoint remains the one place that reports it,
-  // exactly as with creation. The adapter doesn't type the role field it
-  // returns; it is the one just written.
-  res.json({ user: toPublicUser({ ...user, role }) });
+  // exactly as with creation.
+  res.json({ user });
 });
 
 // Admin-only soft delete. The row is kept with deletedAt set — its email stays

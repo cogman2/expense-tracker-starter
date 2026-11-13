@@ -210,3 +210,12 @@ test.describe("UI: delete dialog (/users)", () => {
     expect(list.users.map((u) => u.id)).toContain(target.id);
   });
 });
+
+test.describe("DELETE /api/users/:id with a malformed id", () => {
+  test("an id containing a NUL byte gets 404 user not found, not 500", async () => {
+    const res = await deleteUser("a%00b", await signInAsAdmin());
+
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: "user not found" });
+  });
+});

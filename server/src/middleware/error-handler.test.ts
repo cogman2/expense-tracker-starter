@@ -39,6 +39,22 @@ describe("describeError", () => {
     });
   });
 
+  test("a path param that isn't valid percent-encoding is a 400", () => {
+    // Shaped like the router's decode failure: a URIError marked 400, not exposed.
+    const err = Object.assign(new URIError("Failed to decode param '%E0%A4%A'"), {
+      status: 400,
+      statusCode: 400,
+    });
+    expect(describeError(err)).toEqual({ status: 400, error: "malformed URL" });
+  });
+
+  test("a URIError the router didn't mark as the client's is still a 500", () => {
+    expect(describeError(new URIError("URI malformed"))).toEqual({
+      status: 500,
+      error: "internal server error",
+    });
+  });
+
   test("a client status not marked exposable is reported as a server error", () => {
     const err = Object.assign(new Error("secret detail"), { status: 400 });
     expect(describeError(err)).toEqual({ status: 500, error: "internal server error" });

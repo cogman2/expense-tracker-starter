@@ -75,9 +75,10 @@ describe("createUserSchema", () => {
     );
   });
 
-  test("rejects a body that is not an object", () => {
-    expect(messageFor({})).toBe("name is required");
-    expect(messageFor(undefined)).toBeTruthy();
+  test("rejects a body that is not an object with the API's message", () => {
+    for (const body of [{}, undefined, null, [], ["x"], "x", 7]) {
+      expect(messageFor(body), JSON.stringify(body)).toBe("name is required");
+    }
   });
 
   test("rejects non-string fields rather than coercing them", () => {
@@ -96,6 +97,14 @@ describe("updateUserSchema", () => {
 
   test("accepts a payload with no password", () => {
     expect(updateUserSchema.parse(withoutPassword)).toEqual(withoutPassword);
+  });
+
+  test("keeps the API's message for a body that is not an object", () => {
+    for (const body of [undefined, null, [], "x"]) {
+      expect(updateUserSchema.safeParse(body).error?.issues[0]?.message, JSON.stringify(body)).toBe(
+        "name is required",
+      );
+    }
   });
 
   test("ignores a password if one is sent", () => {
