@@ -78,8 +78,6 @@ tests. Use what `core/src/users.ts` exports:
 
 Adding a role means adding it to `ROLES` and `Role` (the `satisfies` clause fails
 the build until both agree) and to Prisma's `Role` enum (`RolesMatchPrisma`).
-Known leftovers to convert when next touched: `server/src/require-auth.ts` and
-`server/src/auth.ts`.
 
 ## Testing
 

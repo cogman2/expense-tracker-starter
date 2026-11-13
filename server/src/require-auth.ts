@@ -1,5 +1,6 @@
 import type { NextFunction, Request, Response } from "express";
 import { fromNodeHeaders } from "better-auth/node";
+import { Role } from "core";
 import { auth } from "./auth";
 
 // The shape Better Auth returns from getSession (a { session, user } pair).
@@ -50,7 +51,7 @@ export async function requireAdmin(
     return;
   }
 
-  if (req.auth.user.role !== "admin") {
+  if (req.auth.user.role !== Role.admin) {
     res.status(403).json({ error: "forbidden" });
     return;
   }

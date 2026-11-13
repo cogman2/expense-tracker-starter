@@ -1,4 +1,5 @@
 import { betterAuth } from "better-auth";
+import { ROLES, Role } from "core";
 import { APIError } from "better-auth/api";
 import { prismaAdapter } from "better-auth/adapters/prisma";
 import { prisma } from "./db";
@@ -28,13 +29,13 @@ export const auth = betterAuth({
     disableSignUp: true,
   },
   // Helpdesk role. `input: false` keeps it out of any client-supplied payload;
-  // it's set server-side (e.g. by the seed script). Defaults to "agent".
+  // it's set server-side (e.g. by the seed script). Defaults to Role.agent.
   user: {
     additionalFields: {
       role: {
-        type: ["admin", "agent"],
+        type: [...ROLES],
         required: false,
-        defaultValue: "agent",
+        defaultValue: Role.agent,
         input: false,
       },
     },
