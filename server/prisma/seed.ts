@@ -1,20 +1,16 @@
 import "dotenv/config";
-import { auth } from "../src/auth";
+import { ROLES, Role, type UserRole } from "core";
 import { prisma } from "../src/db";
-import { Role } from "../src/generated/prisma/enums";
+import { createCredentialUser } from "../src/users";
 
-// Seeds a single user (admin or agent). Because the public sign-up endpoint is
-// disabled (see src/auth.ts), we create the user through Better Auth's
-// internal adapter instead of the HTTP API. The password is hashed with
-// Better Auth's own hasher (scrypt) so credential sign-in works, and the
-// credential lands in the `Account` table as providerId "credential".
+// Seeds a single user (admin or agent). The public sign-up endpoint is
+// disabled (see src/auth.ts), so the user is created the same way
+// POST /api/users creates one: createCredentialUser (src/users.ts).
 //
 // Credentials and role come from the environment (see .env.example):
 //   SEED_USER_EMAIL, SEED_USER_PASSWORD, SEED_USER_NAME, SEED_USER_ROLE
-const ROLES = Object.values(Role);
-
-function isRole(value: string): value is Role {
-  return (ROLES as string[]).includes(value);
+function isRole(value: string): value is UserRole {
+  return (ROLES as readonly string[]).includes(value);
 }
 
 async function main() {
@@ -41,28 +37,11 @@ async function main() {
     throw new Error(`SEED_USER_ROLE must be one of ${ROLES.join(" | ")}, got "${role}"`);
   }
 
-  const ctx = await auth.$context;
-
-  const existing = await ctx.internalAdapter.findUserByEmail(email);
-  if (existing) {
+  const user = await createCredentialUser({ name, email, password: effectivePassword, role });
+  if (!user) {
     console.log(`[seed] user already exists: ${email} — nothing to do`);
     return;
   }
-
-  const user = await ctx.internalAdapter.createUser({
-    email,
-    name,
-    role,
-    emailVerified: true,
-  });
-
-  const hash = await ctx.password.hash(effectivePassword);
-  await ctx.internalAdapter.linkAccount({
-    userId: user.id,
-    providerId: "credential",
-    accountId: user.id,
-    password: hash,
-  });
 
   console.log(`[seed] created ${role}: ${email} (id ${user.id})`);
 }

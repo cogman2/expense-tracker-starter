@@ -14,6 +14,12 @@ import { prisma } from "../db";
 import { requireAuth, requireAdmin } from "../require-auth";
 import { HttpError } from "../http-error";
 import { parseBody } from "../schemas";
+import {
+  PUBLIC_USER_SELECT,
+  createCredentialUser,
+  findActiveUser,
+  toPublicUser,
+} from "../users";
 
 export const usersRouter = express.Router();
 
@@ -25,62 +31,29 @@ usersRouter.get("/api/me", requireAuth, (req, res) => {
   res.json({ user: req.auth!.user });
 });
 
-// Whether a user has been soft-deleted (see the DELETE route below).
-async function isDeleted(id: string): Promise<boolean> {
-  const row = await prisma.user.findUnique({
-    where: { id },
-    select: { deletedAt: true },
-  });
-  return row?.deletedAt != null;
-}
-
 // Admin-only user list. Explicit `select` (never raw rows) keeps the response
 // to safe fields — no password hash (which lives on Account, not User) or
 // session data can leak. Soft-deleted users are left out.
 usersRouter.get("/api/users", requireAuth, requireAdmin, async (_req, res) => {
   const users = await prisma.user.findMany({
     where: { deletedAt: null },
-    select: { id: true, name: true, email: true, role: true, createdAt: true },
+    select: { ...PUBLIC_USER_SELECT, createdAt: true },
     orderBy: { createdAt: "asc" },
   });
   res.json({ users });
 });
 
 // Admin-only user creation. Public sign-up is disabled (see ../auth.ts), so
-// admins provision accounts here. Mirrors prisma/seed.ts: the user is created
-// through Better Auth's internal adapter and the password hashed with Better
-// Auth's own hasher, so credential sign-in works. requireAdmin enforces the
-// authorization server-side — the client route guard is UX only.
+// admins provision accounts here, through the same createCredentialUser as
+// prisma/seed.ts. requireAdmin enforces the authorization server-side — the
+// client route guard is UX only.
 usersRouter.post("/api/users", requireAuth, requireAdmin, async (req, res) => {
   // One schema shared with the client's form (core/src/users.ts). It trims the
   // name, lowercases the email and narrows the role, so everything below works
   // with clean values.
-  const { name, email, password, role } = parseBody(createUserSchema, req.body);
-
-  const ctx = await auth.$context;
-
-  const existing = await ctx.internalAdapter.findUserByEmail(email);
-  if (existing) throw new HttpError(409, "a user with that email already exists");
-
-  const user = await ctx.internalAdapter.createUser({
-    email,
-    name,
-    role,
-    emailVerified: true,
-  });
-
-  const hash = await ctx.password.hash(password);
-  await ctx.internalAdapter.linkAccount({
-    userId: user.id,
-    providerId: "credential",
-    accountId: user.id,
-    password: hash,
-  });
-
-  // Return only safe fields — never the password hash or session data.
-  res.status(201).json({
-    user: { id: user.id, name: user.name, email: user.email, role: user.role },
-  });
+  const user = await createCredentialUser(parseBody(createUserSchema, req.body));
+  if (!user) throw new HttpError(409, "a user with that email already exists");
+  res.status(201).json({ user });
 });
 
 // Admin-only user edit: name, email and role. Passwords are not editable here —
@@ -93,10 +66,8 @@ usersRouter.patch<{ id: string }>("/api/users/:id", requireAuth, requireAdmin, a
 
   const ctx = await auth.$context;
 
-  // A soft-deleted user is gone as far as the API is concerned. The adapter's
-  // User type does not carry deletedAt, so that one column is read via Prisma.
-  const target = await ctx.internalAdapter.findUserById(req.params.id);
-  if (!target || (await isDeleted(target.id))) throw new HttpError(404, "user not found");
+  const target = await findActiveUser(req.params.id);
+  if (!target) throw new HttpError(404, "user not found");
 
   // An admin demoting themselves would lose access to this very page (and could
   // strip the last admin), so it is refused rather than silently honored. Editing
@@ -120,11 +91,10 @@ usersRouter.patch<{ id: string }>("/api/users/:id", requireAuth, requireAdmin, a
     role,
   });
 
-  // Only safe fields, and no createdAt — the list endpoint remains the one place
-  // that reports it, exactly as with creation.
-  res.json({
-    user: { id: user.id, name: user.name, email: user.email, role: user.role },
-  });
+  // No createdAt — the list endpoint remains the one place that reports it,
+  // exactly as with creation. The adapter doesn't type the role field it
+  // returns; it is the one just written.
+  res.json({ user: toPublicUser({ ...user, role }) });
 });
 
 // Admin-only soft delete. The row is kept with deletedAt set — its email stays
@@ -134,11 +104,8 @@ usersRouter.patch<{ id: string }>("/api/users/:id", requireAuth, requireAdmin, a
 // them become unassigned. Admin accounts cannot be deleted at all, which also
 // rules out deleting yourself.
 usersRouter.delete<{ id: string }>("/api/users/:id", requireAuth, requireAdmin, async (req, res) => {
-  const target = await prisma.user.findUnique({
-    where: { id: req.params.id },
-    select: { id: true, role: true, deletedAt: true },
-  });
-  if (!target || target.deletedAt) throw new HttpError(404, "user not found");
+  const target = await findActiveUser(req.params.id);
+  if (!target) throw new HttpError(404, "user not found");
   if (!canDeleteUser(target)) throw new HttpError(409, "admin users cannot be deleted");
 
   // Their tickets go back to unassigned in the same transaction: a deleted user
